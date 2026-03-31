@@ -1,20 +1,20 @@
 """
-TDMSReader GUI – A DIAdem-like viewer for NI TDMS files.
+TDMS Okuyucu – NI TDMS dosyaları için DIAdem benzeri görüntüleyici.
 
-Improvements applied over the original version:
-- Proper resource management (context managers for TDMS files)
-- Thread lifecycle management with cleanup tracking
-- Eliminated silent exception swallowing; errors are logged
-- Reduced code duplication via helper methods
-- Added CSV export for plotted data
-- Configurable constants extracted into a dataclass
-- Fixed memory leaks in worker/thread lifecycle
-- Race condition fixes in lazy-loading pipeline
-- Improved numpy array handling (fewer unnecessary copies)
-- Type hints throughout for IDE support and documentation
-- Proper docstrings on public methods
-- Fixed digital-step rendering for very large channels
-- Better progress feedback during long operations
+Orijinal sürüme göre yapılan iyileştirmeler:
+- Doğru kaynak yönetimi (TDMS dosyaları için bağlam yöneticileri)
+- Temizleme takibi ile iş parçacığı yaşam döngüsü yönetimi
+- Sessiz istisna yutma kaldırıldı; hatalar kaydedilir
+- Yardımcı metotlar ile kod tekrarı azaltıldı
+- Çizili veriler için CSV dışa aktarma eklendi
+- Yapılandırılabilir sabitler dataclass'a çıkarıldı
+- Worker/thread yaşam döngüsündeki bellek sızıntıları düzeltildi
+- Tembel yükleme hattındaki yarış durumu düzeltmeleri
+- Geliştirilmiş numpy dizi işleme (daha az gereksiz kopya)
+- IDE desteği ve dokümantasyon için kapsamlı tip ipuçları
+- Genel metotlarda uygun docstring'ler
+- Çok büyük kanallar için düzeltilmiş dijital adım çizimi
+- Uzun işlemler sırasında daha iyi ilerleme geri bildirimi
 """
 
 from __future__ import annotations
@@ -453,7 +453,7 @@ def _safe_str(v: Any) -> str:
 def infer_quantity_from_props(props: dict) -> str:
     """Best-effort extraction of a human-readable quantity name from TDMS properties."""
     if not props:
-        return "Value"
+        return "Değer"
     preferred = [
         "quantity", "Quantity", "physical_quantity", "PhysicalQuantity",
         "measurement", "Measurement", "NI_MeasurementName", "NI_SignalName",
@@ -471,7 +471,7 @@ def infer_quantity_from_props(props: dict) -> str:
             s = _safe_str(v)
             if s:
                 return s[:80]
-    return "Value"
+    return "Değer"
 
 
 def common_unit(series_list: List[dict]) -> Optional[str]:
@@ -559,10 +559,10 @@ def _axis_mode_and_label(series_list: List[dict]) -> Tuple[str, str]:
     if not series_list:
         return "numeric", "X"
     if all(s.get("x_mode") == "datetime" for s in series_list):
-        return "date", "Time (UTC)"
+        return "date", "Zaman (UTC)"
     if any(s.get("x_mode") == "seconds" for s in series_list):
-        return "numeric", "Time (s)"
-    return "numeric", "Index"
+        return "numeric", "Zaman (s)"
+    return "numeric", "İndeks"
 
 
 def _format_x_display(axis_mode: str, x: float) -> str:
@@ -672,7 +672,7 @@ class TdmsIndexWorker(CancellableWorker):
                 return
             self.finished.emit({"file_id": self.file_id, "refs": refs})
         except Exception as e:
-            self.failed.emit(f"TDMS index read error:\n{e}")
+            self.failed.emit(f"TDMS dizin okuma hatası:\n{e}")
 
 
 class TdmsChannelPreviewWorker(CancellableWorker):
@@ -716,7 +716,7 @@ class TdmsChannelPreviewWorker(CancellableWorker):
                     "x_info": {"x_mode": x_mode, "fs_est": fs},
                 })
         except Exception as e:
-            self.failed.emit(f"Preview error:\n{e}")
+            self.failed.emit(f"Önizleme hatası:\n{e}")
 
 
 class MultiTdmsChannelLoadWorker(CancellableWorker):
@@ -893,12 +893,12 @@ class MultiTdmsChannelLoadWorker(CancellableWorker):
                 return
 
             axis_mode = "date" if all(m == "datetime" for m in x_modes) else "numeric"
-            x_label = "Time (UTC)" if axis_mode == "date" else (
-                "Time (s)" if any(m == "seconds" for m in x_modes) else "Index"
+            x_label = "Zaman (UTC)" if axis_mode == "date" else (
+                "Zaman (s)" if any(m == "seconds" for m in x_modes) else "İndeks"
             )
             self.finished.emit({"series": series, "axis_mode": axis_mode, "x_label": x_label})
         except Exception as e:
-            self.failed.emit(f"Channel data loading failed:\n{e}")
+            self.failed.emit(f"Kanal verisi yükleme başarısız:\n{e}")
 
 
 class LazyViewLoadWorker(CancellableWorker):
@@ -962,7 +962,7 @@ class LazyViewLoadWorker(CancellableWorker):
 
             self.finished.emit({"updates": {} if self.is_cancelled else updates, "cancelled": self.is_cancelled})
         except Exception as e:
-            self.failed.emit(f"Lazy view read failed:\n{e}")
+            self.failed.emit(f"Tembel görünüm okuma başarısız:\n{e}")
 
 
 class FilterWorker(CancellableWorker):
@@ -992,15 +992,15 @@ class FilterWorker(CancellableWorker):
                 is_dig = bool(s.get("is_digital"))
                 if self.apply_filter and not is_dig:
                     if not SCIPY_AVAILABLE:
-                        tag = "(SG n/a)"
+                        tag = "(SG yok)"
                     else:
                         try:
                             y = apply_savgol_safe(y, self.window_len)
                             tag = "(SG)"
                         except Exception:
-                            tag = "(SG ERR)"
+                            tag = "(SG HATA)"
                 elif is_dig:
-                    tag = "(Digital)"
+                    tag = "(Dijital)"
 
                 ss = s.copy()
                 ss["y"] = y
@@ -1015,7 +1015,7 @@ class FilterWorker(CancellableWorker):
                 "x_label": x_label,
             })
         except Exception as e:
-            self.failed.emit(f"Filter computation failed:\n{e}")
+            self.failed.emit(f"Filtre hesaplama başarısız:\n{e}")
 
 
 class FFTWorker(CancellableWorker):
@@ -1048,7 +1048,7 @@ class FFTWorker(CancellableWorker):
         try:
             y = np.asarray(self.y, dtype=np.float64).copy()
             if y.size < CFG.min_fft_samples:
-                raise ValueError(f"Not enough samples for FFT (need >= {CFG.min_fft_samples}).")
+                raise ValueError(f"FFT için yeterli örnek yok (en az {CFG.min_fft_samples} gerekli).")
 
             if self.detrend_linear:
                 y = linear_detrend_safe(y)
@@ -1060,7 +1060,7 @@ class FFTWorker(CancellableWorker):
             if fs is None:
                 fs = self.fs_hint
             if fs is None or fs <= 0:
-                raise ValueError("Sampling rate (Fs) unknown. Enter Fs manually or choose a time-domain channel.")
+                raise ValueError("Örnekleme hızı (Fs) bilinmiyor. Fs'yi manuel girin veya zamana dayalı bir kanal seçin.")
 
             window_name = "None"
             coherent_gain = 1.0
@@ -1093,7 +1093,7 @@ class FFTWorker(CancellableWorker):
                 "use_window": self.use_window,
             })
         except Exception as e:
-            self.failed.emit(f"FFT computation failed:\n{e}")
+            self.failed.emit(f"FFT hesaplama başarısız:\n{e}")
 
 
 # ===================================================================
@@ -1163,7 +1163,7 @@ class PlotPane(QWidget):
         self._crosshair_v: Optional[pg.InfiniteLine] = None
         self._crosshair_h: Optional[pg.InfiniteLine] = None
 
-        self._info = QLabel("Cursor: —")
+        self._info = QLabel("İmleç: —")
         self._info.setObjectName("cursorInfo")
         try:
             self._info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -1589,7 +1589,7 @@ class PlotPane(QWidget):
         vb.sigYRangeChanged.connect(self._on_left_yrange_changed)
 
         self.plot.setLabel("bottom", x_label)
-        self.plot.setLabel("left", "Value")
+        self.plot.setLabel("left", "Değer")
 
         self._layout.addWidget(self.plot, stretch=1)
         self._apply_theme()
@@ -1674,8 +1674,8 @@ class PlotPane(QWidget):
             if cu:
                 return f"{cq} ({cu})"
             has_any_unit = any((s.get("unit") or "").strip() for s in series_list)
-            return f"{cq} (units in legend)" if has_any_unit else cq
-        return f"Value ({cu})" if cu else "Value"
+            return f"{cq} (birimler göstergede)" if has_any_unit else cq
+        return f"Değer ({cu})" if cu else "Değer"
 
     def _set_axis_titles(
         self, x_label: str, y_left: str,
@@ -1683,7 +1683,7 @@ class PlotPane(QWidget):
     ) -> None:
         pi = self.plot.getPlotItem()
         self.plot.setLabel("bottom", x_label)
-        self.plot.setLabel("left", y_left or "Value")
+        self.plot.setLabel("left", y_left or "Değer")
 
         parts = [f"<b>X:</b> {x_label}", f"<b>Y:</b> {y_left or '—'}"]
         if y_right:
@@ -1772,7 +1772,7 @@ class PlotPane(QWidget):
             self.clear_all()
 
         if not series_list:
-            self._set_axis_titles(x_label, "Value", None)
+            self._set_axis_titles(x_label, "Değer", None)
             self._apply_theme()
             return
 
@@ -1791,11 +1791,11 @@ class PlotPane(QWidget):
         analog = [s for s in series_list if not s.get("is_digital")]
         digital = [s for s in series_list if s.get("is_digital")]
 
-        y_left = self._compute_y_label(analog) if analog else (self._compute_y_label(series_list) or "Value")
+        y_left = self._compute_y_label(analog) if analog else (self._compute_y_label(series_list) or "Değer")
 
         if digital:
             self._ensure_right_axis()
-            self._set_axis_titles(x_label, y_left, "Digital")
+            self._set_axis_titles(x_label, y_left, "Dijital")
         else:
             self._destroy_right_axis()
             self._set_axis_titles(x_label, y_left, None)
@@ -1821,7 +1821,7 @@ class PlotPane(QWidget):
             if tag:
                 parts[0] += f" {tag}"
             if is_dig:
-                parts[0] += " [DIG]"
+                parts[0] += " [DİJ]"
             if x_shift != 0.0:
                 parts[0] += f" (x{x_shift:+g})"
             return parts[0]
@@ -2148,7 +2148,7 @@ class PlotPane(QWidget):
         if self.axis_mode == "date":
             try:
                 t = datetime.fromtimestamp(mp.x(), tz=timezone.utc).isoformat()
-                self._info.setText(f"Time: {t} | Y: {val_txt}")
+                self._info.setText(f"Zaman: {t} | Y: {val_txt}")
             except Exception:
                 self._info.setText(f"X={mp.x():.6g} | Y: {val_txt}")
         else:
@@ -2239,14 +2239,14 @@ class PlotPane(QWidget):
         lay.setContentsMargins(4, 4, 4, 4)
         lay.setSpacing(6)
 
-        self._qb_pan = self._mk_qb_btn("pan_hand.png", "Pan", checkable=True)
-        self._qb_zoom = self._mk_qb_btn("zoom_plus.png", "Zoom (Rect)", checkable=True)
-        self._qb_fit = self._mk_qb_btn("move_pan.png", "Auto Fit")
-        self._qb_region = self._mk_qb_btn("region_rect.png", "Range Selector", checkable=True)
-        self._qb_legend = self._mk_qb_btn("legend_menu.png", "Legend", checkable=True)
-        self._qb_marker = self._mk_qb_btn("marker_pin.png", "Click to Mark", checkable=True)
-        self._qb_ylock = self._mk_qb_btn("y_lock.png", "Y Lock", checkable=True)
-        self._qb_y2lock = self._mk_qb_btn("y2_lock.png", "Y2 (Digital) Lock", checkable=True)
+        self._qb_pan = self._mk_qb_btn("pan_hand.png", "Kaydır", checkable=True)
+        self._qb_zoom = self._mk_qb_btn("zoom_plus.png", "Yakınlaştır (Dikdörtgen)", checkable=True)
+        self._qb_fit = self._mk_qb_btn("move_pan.png", "Otomatik Sığdır")
+        self._qb_region = self._mk_qb_btn("region_rect.png", "Aralık Seçici", checkable=True)
+        self._qb_legend = self._mk_qb_btn("legend_menu.png", "Gösterge", checkable=True)
+        self._qb_marker = self._mk_qb_btn("marker_pin.png", "Tıkla İşaretle", checkable=True)
+        self._qb_ylock = self._mk_qb_btn("y_lock.png", "Y Kilidi", checkable=True)
+        self._qb_y2lock = self._mk_qb_btn("y2_lock.png", "Y2 (Dijital) Kilidi", checkable=True)
 
         self._qb_mode_group = QButtonGroup(self)
         self._qb_mode_group.setExclusive(True)
@@ -2297,7 +2297,7 @@ class DetachedPlotWindow(QMainWindow):
 
     def __init__(self, bg_rgb: Tuple[int, int, int], parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Plot (Detached)")
+        self.setWindowTitle("Grafik (Ayrılmış)")
         self.resize(1280, 800)
         self.pane = PlotPane(bg_rgb=bg_rgb)
         self.setCentralWidget(self.pane)
@@ -2316,7 +2316,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("TDMSReader")
+        self.setWindowTitle("TDMS Okuyucu")
         self.resize(1560, 920)
 
         self.settings = QSettings(CFG.settings_org, CFG.settings_app)
@@ -2366,13 +2366,13 @@ class MainWindow(QMainWindow):
         self._restore_ui_state()
         self._apply_interaction_mode_to_all()
 
-        self.status.showMessage("Open a TDMS file from the 'Open' tab on the left.")
+        self.status.showMessage("Soldaki 'Aç' sekmesinden bir TDMS dosyası açın.")
 
         if not SCIPY_AVAILABLE:
             QMessageBox.warning(
-                self, "Missing Library",
-                "Scipy is not installed. Savitzky-Golay filter will not work.\n"
-                "Install with: pip install scipy",
+                self, "Eksik Kütüphane",
+                "Scipy yüklü değil. Savitzky-Golay filtresi çalışmayacak.\n"
+                "Yüklemek için: pip install scipy",
             )
             self.chk_smooth.setEnabled(False)
 
@@ -2454,7 +2454,7 @@ class MainWindow(QMainWindow):
             self._set_bg_button_preview(self.plot_bg_rgb)
             self._apply_background_everywhere()
             if hasattr(self, "status") and self.status is not None:
-                self.status.showMessage(f"Theme: {'Dark' if self._theme == 'dark' else 'Light'}", 2000)
+                self.status.showMessage(f"Tema: {'Koyu' if self._theme == 'dark' else 'Açık'}", 2000)
         finally:
             self._theme_guard = False
 
@@ -2491,30 +2491,30 @@ class MainWindow(QMainWindow):
         open_l = QVBoxLayout(open_tab)
         open_l.setContentsMargins(10, 10, 10, 10)
         open_l.setSpacing(10)
-        self.btn_open = QPushButton("Open TDMS...")
+        self.btn_open = QPushButton("TDMS Aç...")
         self.btn_open.setProperty("primary", True)
-        self.lbl_hint = QLabel("One or more TDMS files can be opened.")
+        self.lbl_hint = QLabel("Bir veya daha fazla TDMS dosyası açılabilir.")
         self.lbl_hint.setWordWrap(True)
         open_l.addWidget(self.btn_open)
         open_l.addWidget(self.lbl_hint)
         open_l.addStretch(1)
-        self.file_tabs.addTab(open_tab, "Open")
+        self.file_tabs.addTab(open_tab, "Aç")
 
         left_layout.addWidget(self.file_tabs, stretch=1)
 
         plot_row = QHBoxLayout()
         plot_row.setSpacing(8)
-        self.btn_plot_checked = QPushButton("Plot Checked Channels")
+        self.btn_plot_checked = QPushButton("Seçili Kanalları Çiz")
         self.btn_plot_checked.setProperty("primary", True)
-        self.btn_uncheck_all = QPushButton("Uncheck All")
-        self.btn_clear_plot = QPushButton("Clear Plot")
+        self.btn_uncheck_all = QPushButton("Tümünü Kaldır")
+        self.btn_clear_plot = QPushButton("Grafiği Temizle")
         self.btn_clear_plot.setProperty("danger", True)
         plot_row.addWidget(self.btn_plot_checked)
         plot_row.addWidget(self.btn_uncheck_all)
         plot_row.addWidget(self.btn_clear_plot)
         left_layout.addLayout(plot_row)
 
-        self.preview_box = QGroupBox("Channel Properties")
+        self.preview_box = QGroupBox("Kanal Özellikleri")
         pf = QFormLayout(self.preview_box)
         pf.setVerticalSpacing(8)
         pf.setHorizontalSpacing(10)
@@ -2522,14 +2522,14 @@ class MainWindow(QMainWindow):
         self.p_file, self.p_name = QLabel("—"), QLabel("—")
         self.p_samples, self.p_fs = QLabel("—"), QLabel("—")
         self.p_unit, self.p_quantity = QLabel("—"), QLabel("—")
-        self.chk_manual_fs_plot = QCheckBox("Use manual Fs when missing")
-        self.chk_manual_fs_plot.setToolTip("When a TDMS channel has no time/Fs info, converts index-based X to time.")
+        self.chk_manual_fs_plot = QCheckBox("Fs eksikse manuel kullan")
+        self.chk_manual_fs_plot.setToolTip("TDMS kanalında zaman/Fs bilgisi yoksa, indeks tabanlı X'i zamana dönüştürür.")
         self.sp_manual_fs_plot = QDoubleSpinBox()
         self.sp_manual_fs_plot.setRange(0.0, 1e12)
         self.sp_manual_fs_plot.setDecimals(6)
         self.sp_manual_fs_plot.setValue(0.0)
         self.sp_manual_fs_plot.setKeyboardTracking(False)
-        self.sp_manual_fs_plot.setToolTip("Sensor sampling frequency. E.g. enter 25 and select kHz for 25 kHz.")
+        self.sp_manual_fs_plot.setToolTip("Sensör örnekleme frekansı. Örn: 25 kHz için 25 girin ve kHz seçin.")
         self.cmb_manual_fs_unit = QComboBox()
         self.cmb_manual_fs_unit.addItems(["Hz", "kHz"])
         self.cmb_manual_fs_unit.setCurrentText("kHz")
@@ -2540,13 +2540,13 @@ class MainWindow(QMainWindow):
         mfsl.addWidget(self.chk_manual_fs_plot)
         mfsl.addWidget(self.sp_manual_fs_plot, 1)
         mfsl.addWidget(self.cmb_manual_fs_unit)
-        pf.addRow("File:", self.p_file)
-        pf.addRow("Name:", self.p_name)
-        pf.addRow("Samples:", self.p_samples)
+        pf.addRow("Dosya:", self.p_file)
+        pf.addRow("İsim:", self.p_name)
+        pf.addRow("Örnek Sayısı:", self.p_samples)
         pf.addRow("Fs:", self.p_fs)
-        pf.addRow("Manual Fs:", manual_fs_row)
-        pf.addRow("Quantity:", self.p_quantity)
-        pf.addRow("Unit:", self.p_unit)
+        pf.addRow("Manuel Fs:", manual_fs_row)
+        pf.addRow("Büyüklük:", self.p_quantity)
+        pf.addRow("Birim:", self.p_unit)
         left_layout.addWidget(self.preview_box)
 
         splitter.addWidget(left)
@@ -2572,7 +2572,7 @@ class MainWindow(QMainWindow):
         self.btn_theme_plot.setCheckable(True)
         self.btn_theme_plot.setChecked(self._theme == "dark")
         self.btn_theme_plot.setText(self._theme_button_text())
-        self.btn_theme_plot.setToolTip("Toggle Theme (Dark/Light)")
+        self.btn_theme_plot.setToolTip("Tema Değiştir (Koyu/Açık)")
         self.btn_theme_plot.setFixedSize(34, 34)
         self.btn_theme_plot.setStyleSheet("border-radius: 17px; font-weight: 900; padding: 0px;")
         plot_topbar.addWidget(self.btn_theme_plot)
@@ -2596,7 +2596,7 @@ class MainWindow(QMainWindow):
         self.btn_ctrl_collapse = QToolButton()
         self.btn_ctrl_collapse.setObjectName("btnCtrlCollapse")
         self.btn_ctrl_collapse.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.btn_ctrl_collapse.setText("Controls")
+        self.btn_ctrl_collapse.setText("Kontroller")
         self.btn_ctrl_collapse.setCheckable(True)
         self.btn_ctrl_collapse.setChecked(False)
         self.btn_ctrl_collapse.setArrowType(Qt.ArrowType.RightArrow)
@@ -2624,32 +2624,32 @@ class MainWindow(QMainWindow):
         rg.setHorizontalSpacing(10)
         rg.setVerticalSpacing(8)
 
-        self.chk_region = QCheckBox("Range Selector")
+        self.chk_region = QCheckBox("Aralık Seçici")
         self.xmin = QDoubleSpinBox()
         self.xmax = QDoubleSpinBox()
         for w in (self.xmin, self.xmax):
             w.setRange(-1e18, 1e18)
             w.setDecimals(6)
             w.setKeyboardTracking(False)
-        self.btn_fit_y = QPushButton("Fit Y to Range")
-        self.btn_bg_pick = QPushButton("Background Color")
-        self.btn_bg_reset = QPushButton("Default Background")
-        self.btn_detach = QPushButton("Detach Plot")
-        self.btn_export_csv = QPushButton("Export CSV")
-        self.btn_export_csv.setToolTip("Export currently plotted channel data to CSV")
+        self.btn_fit_y = QPushButton("Y'yi Aralığa Sığdır")
+        self.btn_bg_pick = QPushButton("Arka Plan Rengi")
+        self.btn_bg_reset = QPushButton("Varsayılan Arka Plan")
+        self.btn_detach = QPushButton("Grafiği Ayır")
+        self.btn_export_csv = QPushButton("CSV Dışa Aktar")
+        self.btn_export_csv.setToolTip("Mevcut çizili kanal verilerini CSV olarak dışa aktar")
         self._set_bg_button_preview(self.plot_bg_rgb)
 
         rg.addWidget(self.chk_region, 0, 0)
         rg.addWidget(QLabel("Min:"), 0, 1)
         rg.addWidget(self.xmin, 0, 2)
-        rg.addWidget(QLabel("Max:"), 0, 3)
+        rg.addWidget(QLabel("Maks:"), 0, 3)
         rg.addWidget(self.xmax, 0, 4)
         rg.addWidget(self.btn_fit_y, 0, 5)
         rg.addWidget(self.btn_bg_pick, 1, 0, 1, 2)
         rg.addWidget(self.btn_bg_reset, 1, 2, 1, 2)
         rg.addWidget(self.btn_detach, 1, 4)
         rg.addWidget(self.btn_export_csv, 1, 5)
-        self.ctrl_tabs.addTab(tab_range, "Range")
+        self.ctrl_tabs.addTab(tab_range, "Aralık")
 
         # Tab: Markers
         tab_markers = QWidget()
@@ -2658,32 +2658,32 @@ class MainWindow(QMainWindow):
         mg.setHorizontalSpacing(10)
         mg.setVerticalSpacing(8)
 
-        self.chk_click_mark = QCheckBox("Click to Mark")
-        self.btn_clear_markers = QPushButton("Clear Markers")
+        self.chk_click_mark = QCheckBox("Tıkla İşaretle")
+        self.btn_clear_markers = QPushButton("İşaretleri Temizle")
         self.btn_clear_markers.setProperty("danger", True)
-        self.btn_marker_add = QPushButton("Add")
-        self.btn_marker_sub = QPushButton("Subtract")
-        self.btn_marker_add.setToolTip("Sum the values of 2 selected markers")
-        self.btn_marker_sub.setToolTip("Subtract selected markers (B - A)")
+        self.btn_marker_add = QPushButton("Topla")
+        self.btn_marker_sub = QPushButton("Çıkar")
+        self.btn_marker_add.setToolTip("Seçili 2 işaretin değerlerini topla")
+        self.btn_marker_sub.setToolTip("Seçili işaretleri çıkar (B - A)")
         self.cmb_marker_calc_axis = QComboBox()
-        self.cmb_marker_calc_axis.addItems(["X only", "Y only", "X and Y"])
-        self.lbl_marker_calc = QLabel("Result: —")
+        self.cmb_marker_calc_axis.addItems(["Yalnız X", "Yalnız Y", "X ve Y"])
+        self.lbl_marker_calc = QLabel("Sonuç: —")
         self.lbl_marker_calc.setStyleSheet("font-weight: 800;")
 
         self.marker_list = QTreeWidget()
-        self.marker_list.setHeaderLabels(["Marker", "X Value", "Y Value"])
+        self.marker_list.setHeaderLabels(["İşaret", "X Değeri", "Y Değeri"])
         self.marker_list.setMaximumHeight(220)
         self.marker_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
 
         mg.addWidget(self.chk_click_mark, 0, 0)
         mg.addWidget(self.btn_clear_markers, 0, 1)
-        mg.addWidget(QLabel("Calc:"), 0, 2)
+        mg.addWidget(QLabel("Hesap:"), 0, 2)
         mg.addWidget(self.cmb_marker_calc_axis, 0, 3)
         mg.addWidget(self.btn_marker_add, 0, 4)
         mg.addWidget(self.btn_marker_sub, 0, 5)
         mg.addWidget(self.lbl_marker_calc, 0, 6)
         mg.addWidget(self.marker_list, 1, 0, 1, 7)
-        self.ctrl_tabs.addTab(tab_markers, "Markers")
+        self.ctrl_tabs.addTab(tab_markers, "İşaretler")
 
         # Tab: Filter & Style
         tab_style = QWidget()
@@ -2692,10 +2692,10 @@ class MainWindow(QMainWindow):
         sg.setHorizontalSpacing(10)
         sg.setVerticalSpacing(8)
 
-        self.chk_smooth = QCheckBox("Savitzky-Golay Smooth")
-        self.chk_cursor_marker = QCheckBox("Show Cursor Marker")
+        self.chk_smooth = QCheckBox("Savitzky-Golay Yumuşatma")
+        self.chk_cursor_marker = QCheckBox("İmleç İşaretini Göster")
         self.chk_cursor_marker.setChecked(True)
-        self.chk_cursor_marker.setToolTip("Toggle the crosshair/dot cursor on the plot")
+        self.chk_cursor_marker.setToolTip("Grafik üzerindeki artı işareti/nokta imlecini aç/kapat")
         self.spin_smooth_win = QSpinBox()
         self.spin_smooth_win.setRange(5, 999)
         self.spin_smooth_win.setSingleStep(2)
@@ -2704,7 +2704,7 @@ class MainWindow(QMainWindow):
 
         self.cmb_style_series = QComboBox()
         self.cmb_style_series.setMinimumWidth(320)
-        self.btn_pick_color = QPushButton("Pick Color")
+        self.btn_pick_color = QPushButton("Renk Seç")
         self._set_color_button_preview(None)
 
         self.sp_line_width = QDoubleSpinBox()
@@ -2720,28 +2720,28 @@ class MainWindow(QMainWindow):
         self.sp_x_shift.setSingleStep(0.1)
         self.sp_x_shift.setValue(0.0)
         self.sp_x_shift.setKeyboardTracking(False)
-        self.sp_x_shift.setToolTip("Per-channel X offset. Seconds for time axes, sample count for index.")
+        self.sp_x_shift.setToolTip("Kanal başına X kaydırma. Zaman eksenleri için saniye, indeks için örnek sayısı.")
 
-        self.btn_style_apply = QPushButton("Apply")
-        self.btn_style_default = QPushButton("Default")
-        self.btn_style_reset_all = QPushButton("Reset All")
+        self.btn_style_apply = QPushButton("Uygula")
+        self.btn_style_default = QPushButton("Varsayılan")
+        self.btn_style_reset_all = QPushButton("Tümünü Sıfırla")
         self.btn_style_reset_all.setProperty("danger", True)
 
         sg.addWidget(self.chk_smooth, 0, 0, 1, 2)
         sg.addWidget(self.chk_cursor_marker, 0, 4, 1, 2)
-        sg.addWidget(QLabel("Filter Window:"), 0, 2)
+        sg.addWidget(QLabel("Filtre Penceresi:"), 0, 2)
         sg.addWidget(self.spin_smooth_win, 0, 3)
-        sg.addWidget(QLabel("Channel:"), 1, 0)
+        sg.addWidget(QLabel("Kanal:"), 1, 0)
         sg.addWidget(self.cmb_style_series, 1, 1, 1, 2)
         sg.addWidget(self.btn_pick_color, 1, 3)
-        sg.addWidget(QLabel("Width:"), 1, 4)
+        sg.addWidget(QLabel("Kalınlık:"), 1, 4)
         sg.addWidget(self.sp_line_width, 1, 5)
-        sg.addWidget(QLabel("X Shift:"), 2, 0)
+        sg.addWidget(QLabel("X Kaydırma:"), 2, 0)
         sg.addWidget(self.sp_x_shift, 2, 1, 1, 2)
         sg.addWidget(self.btn_style_apply, 2, 3)
         sg.addWidget(self.btn_style_default, 2, 4)
         sg.addWidget(self.btn_style_reset_all, 2, 5)
-        self.ctrl_tabs.addTab(tab_style, "Style")
+        self.ctrl_tabs.addTab(tab_style, "Stil")
 
         plot_vsplit = QSplitter(Qt.Orientation.Vertical)
         plot_vsplit.setHandleWidth(8)
@@ -2756,7 +2756,7 @@ class MainWindow(QMainWindow):
         self._on_controls_panel_toggled(False)
 
         plot_tab_layout.addWidget(plot_vsplit, stretch=1)
-        self.tabs.addTab(plot_tab, "Plot Analysis")
+        self.tabs.addTab(plot_tab, "Grafik Analizi")
 
         # --- FFT tab ---
         fft_tab = QWidget()
@@ -2770,7 +2770,7 @@ class MainWindow(QMainWindow):
         self.btn_theme_fft.setCheckable(True)
         self.btn_theme_fft.setChecked(self._theme == "dark")
         self.btn_theme_fft.setText(self._theme_button_text())
-        self.btn_theme_fft.setToolTip("Toggle Theme (Dark/Light)")
+        self.btn_theme_fft.setToolTip("Tema Değiştir (Koyu/Açık)")
         self.btn_theme_fft.setFixedSize(34, 34)
         self.btn_theme_fft.setStyleSheet("border-radius: 17px; font-weight: 900; padding: 0px;")
         fft_topbar.addWidget(self.btn_theme_fft)
@@ -2778,11 +2778,11 @@ class MainWindow(QMainWindow):
 
         self.fft_plot = PlotWidget()
         self.fft_plot.showGrid(x=True, y=True, alpha=0.28)
-        self.fft_plot.setLabel("bottom", "Frequency (Hz)")
-        self.fft_plot.setLabel("left", "Amplitude")
+        self.fft_plot.setLabel("bottom", "Frekans (Hz)")
+        self.fft_plot.setLabel("left", "Genlik")
         fft_layout.addWidget(self.fft_plot, stretch=1)
 
-        self.lbl_fft_info = QLabel("Select a channel and compute FFT.")
+        self.lbl_fft_info = QLabel("Bir kanal seçin ve FFT hesaplayın.")
         self.lbl_fft_info.setWordWrap(True)
         self.lbl_fft_info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         fft_layout.addWidget(self.lbl_fft_info)
@@ -2798,19 +2798,19 @@ class MainWindow(QMainWindow):
         fft_row1.setHorizontalSpacing(8)
         fft_row1.setVerticalSpacing(8)
         self.cmb_fft_channel = QComboBox()
-        self.cmb_fft_channel.setToolTip("Channel for FFT analysis")
+        self.cmb_fft_channel.setToolTip("FFT analizi için kanal")
         self.fs_fft = QDoubleSpinBox()
         self.fs_fft.setRange(0.0, 1e12)
         self.fs_fft.setDecimals(6)
         self.fs_fft.setValue(0.0)
         self.fs_fft.setKeyboardTracking(False)
-        self.fs_fft.setToolTip("0 = auto from time axis. Enter Fs manually if needed.")
-        self.btn_fft = QPushButton("Compute FFT")
+        self.fs_fft.setToolTip("0 = zaman ekseninden otomatik. Gerekirse Fs'yi manuel girin.")
+        self.btn_fft = QPushButton("FFT Hesapla")
         self.btn_fft.setProperty("primary", True)
-        self.btn_fft_clear = QPushButton("Clear FFT")
-        fft_row1.addWidget(QLabel("Channel:"), 0, 0)
+        self.btn_fft_clear = QPushButton("FFT Temizle")
+        fft_row1.addWidget(QLabel("Kanal:"), 0, 0)
         fft_row1.addWidget(self.cmb_fft_channel, 0, 1)
-        fft_row1.addWidget(QLabel("Fs (0=auto):"), 0, 2)
+        fft_row1.addWidget(QLabel("Fs (0=otomatik):"), 0, 2)
         fft_row1.addWidget(self.fs_fft, 0, 3)
         fft_row1.addWidget(self.btn_fft, 0, 4)
         fft_row1.addWidget(self.btn_fft_clear, 0, 5)
@@ -2820,22 +2820,22 @@ class MainWindow(QMainWindow):
         fft_row2 = QHBoxLayout()
         fft_row2.setSpacing(12)
         self.chk_fft_log = QCheckBox("Log (dB)")
-        self.chk_fft_log.setToolTip("Y axis in dB")
-        self.chk_fft_window = QCheckBox("Hanning window")
+        self.chk_fft_log.setToolTip("Y ekseni dB cinsinden")
+        self.chk_fft_window = QCheckBox("Hanning penceresi")
         self.chk_fft_window.setChecked(True)
-        self.chk_fft_window.setToolTip("Apply Hanning window to reduce spectral leakage")
-        self.chk_fft_remove_mean = QCheckBox("Remove mean")
+        self.chk_fft_window.setToolTip("Spektral kaçağı azaltmak için Hanning penceresi uygula")
+        self.chk_fft_remove_mean = QCheckBox("Ortalamayı kaldır")
         self.chk_fft_remove_mean.setChecked(True)
-        self.chk_fft_remove_mean.setToolTip("Reduce DC offset")
-        self.chk_fft_detrend = QCheckBox("Linear detrend")
+        self.chk_fft_remove_mean.setToolTip("DC bileşenini azalt")
+        self.chk_fft_detrend = QCheckBox("Doğrusal trend kaldır")
         self.chk_fft_detrend.setChecked(True)
-        self.chk_fft_detrend.setToolTip("Remove slow trend/drift")
-        self.chk_fft_hide_dc = QCheckBox("Hide 0 Hz")
+        self.chk_fft_detrend.setToolTip("Yavaş trend/sapma kaldır")
+        self.chk_fft_hide_dc = QCheckBox("0 Hz'i gizle")
         self.chk_fft_hide_dc.setChecked(True)
-        self.chk_fft_hide_dc.setToolTip("Hide DC component from the plot")
-        self.chk_fft_peak = QCheckBox("Mark dominant peak")
+        self.chk_fft_hide_dc.setToolTip("DC bileşenini grafikten gizle")
+        self.chk_fft_peak = QCheckBox("Baskın tepeyi işaretle")
         self.chk_fft_peak.setChecked(True)
-        self.chk_fft_peak.setToolTip("Mark the strongest frequency")
+        self.chk_fft_peak.setToolTip("En güçlü frekansı işaretle")
         for w in (self.chk_fft_log, self.chk_fft_window, self.chk_fft_remove_mean,
                   self.chk_fft_detrend, self.chk_fft_hide_dc, self.chk_fft_peak):
             fft_row2.addWidget(w)
@@ -2857,13 +2857,13 @@ class MainWindow(QMainWindow):
         fft_row3.addWidget(QLabel("Min f (Hz):"))
         fft_row3.addWidget(self.sp_fft_fmin)
         fft_row3.addSpacing(8)
-        fft_row3.addWidget(QLabel("Max f (Hz, 0=Nyquist):"))
+        fft_row3.addWidget(QLabel("Maks f (Hz, 0=Nyquist):"))
         fft_row3.addWidget(self.sp_fft_fmax)
         fft_row3.addStretch(1)
         fft_panel_l.addLayout(fft_row3)
 
         fft_layout.addWidget(fft_panel)
-        self.tabs.addTab(fft_tab, "Frequency Analysis (FFT)")
+        self.tabs.addTab(fft_tab, "Frekans Analizi (FFT)")
 
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 1)
@@ -3080,7 +3080,7 @@ class MainWindow(QMainWindow):
         )
 
     def pick_background_color(self) -> None:
-        c = QColorDialog.getColor(QColor(*self.plot_bg_rgb), self, "Choose Background Color")
+        c = QColorDialog.getColor(QColor(*self.plot_bg_rgb), self, "Arka Plan Rengi Seçin")
         if not c.isValid():
             return
         self.plot_bg_rgb = qcolor_to_tuple(c)
@@ -3141,7 +3141,7 @@ class MainWindow(QMainWindow):
                 self.detached_win.pane.add_marker(m["x"], m["y"], m["label"])
 
             self.detached_win.show()
-            self.btn_detach.setText("Re-attach Plot")
+            self.btn_detach.setText("Grafiği Geri Bağla")
         else:
             self.detached_win.close()
 
@@ -3152,17 +3152,17 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         self.detached_win = None
-        self.btn_detach.setText("Detach Plot")
+        self.btn_detach.setText("Grafiği Ayır")
 
     # ----- Style UI -----
 
     def _set_color_button_preview(self, rgb: Optional[Tuple[int, int, int]]) -> None:
         if rgb is None:
-            self.btn_pick_color.setText("Pick Color (Auto)")
+            self.btn_pick_color.setText("Renk Seç (Otomatik)")
             self.btn_pick_color.setStyleSheet("")
         else:
             r, g, b = rgb
-            self.btn_pick_color.setText("Pick Color")
+            self.btn_pick_color.setText("Renk Seç")
             self.btn_pick_color.setStyleSheet(
                 f"background-color: rgb({r},{g},{b}); color: white; font-weight: 800; border-radius: 9px;"
             )
@@ -3199,7 +3199,7 @@ class MainWindow(QMainWindow):
         st = self.style_map.get(skey, {})
         current = st.get("color")
         initial = QColor(*(current if isinstance(current, tuple) else (0, 120, 215)))
-        c = QColorDialog.getColor(initial, self, "Pick Color")
+        c = QColorDialog.getColor(initial, self, "Renk Seç")
         if not c.isValid():
             return
         st["color"] = qcolor_to_tuple(c)
@@ -3359,7 +3359,7 @@ class MainWindow(QMainWindow):
     def open_tdms(self) -> None:
         last_dir = str(self.settings.value("paths/last_dir", "") or "")
         start_dir = last_dir if (last_dir and os.path.isdir(last_dir)) else ""
-        path, _ = QFileDialog.getOpenFileName(self, "Open TDMS", start_dir, "TDMS (*.tdms)")
+        path, _ = QFileDialog.getOpenFileName(self, "TDMS Aç", start_dir, "TDMS (*.tdms)")
         if not path:
             return
         try:
@@ -3405,16 +3405,16 @@ class MainWindow(QMainWindow):
         lbl = QLabel(path)
         lbl.setWordWrap(True)
         lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        hdr.addWidget(QLabel("File:"))
+        hdr.addWidget(QLabel("Dosya:"))
         hdr.addWidget(lbl, stretch=1)
         lay.addLayout(hdr)
 
         search = QLineEdit()
-        search.setPlaceholderText("Search channels...")
+        search.setPlaceholderText("Kanal ara...")
         lay.addWidget(search)
 
         tree = QTreeWidget()
-        tree.setHeaderLabels(["Channel Name", "Samples"])
+        tree.setHeaderLabels(["Kanal Adı", "Örnek Sayısı"])
         tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         tree.setEditTriggers(
             QAbstractItemView.EditTrigger.DoubleClicked | QAbstractItemView.EditTrigger.EditKeyPressed
@@ -3429,7 +3429,7 @@ class MainWindow(QMainWindow):
         self.file_tabs.setCurrentIndex(self.file_tabs.count() - 1)
         self.files[file_id] = FileState(file_id=file_id, path=path, label=label, tree=tree, search=search)
 
-        self.status.showMessage(f"{label}: indexing...")
+        self.status.showMessage(f"{label}: dizin okunuyor...")
         worker = TdmsIndexWorker(file_id, path)
         self._start_job(worker, self._on_index_ready, tag="index")
 
@@ -3459,11 +3459,11 @@ class MainWindow(QMainWindow):
         if file_id_to_remove and file_id_to_remove in self.files:
             del self.files[file_id_to_remove]
         gc.collect()
-        self.status.showMessage("File closed.", 2000)
+        self.status.showMessage("Dosya kapatıldı.", 2000)
 
     def _on_worker_failed(self, msg: str) -> None:
-        QMessageBox.critical(self, "Error", msg)
-        self.status.showMessage("An error occurred.", 5000)
+        QMessageBox.critical(self, "Hata", msg)
+        self.status.showMessage("Bir hata oluştu.", 5000)
 
     def _on_index_ready(self, payload: dict) -> None:
         if payload.get("cancelled"):
@@ -3474,7 +3474,7 @@ class MainWindow(QMainWindow):
         if not st:
             return
         self._populate_tree(st, refs)
-        self.status.showMessage(f"{st.label}: {len(refs)} channels found.", 5000)
+        self.status.showMessage(f"{st.label}: {len(refs)} kanal bulundu.", 5000)
 
     def _populate_tree(self, st: FileState, refs: List[Tuple[str, str, int]]) -> None:
         tree = st.tree
@@ -3541,7 +3541,7 @@ class MainWindow(QMainWindow):
             return "—"
         raw_value = self.sp_manual_fs_plot.value()
         raw_unit = self.cmb_manual_fs_unit.currentText() or "Hz"
-        return f"{raw_value:.6g} {raw_unit} ({fs_hz:.6g} Hz, manual)"
+        return f"{raw_value:.6g} {raw_unit} ({fs_hz:.6g} Hz, manuel)"
 
     def _rebuild_uniform_x(self, s: dict, x_mode: str, x_base: float, x_inc: float) -> np.ndarray:
         if s.get("lazy_meta"):
@@ -3616,9 +3616,9 @@ class MainWindow(QMainWindow):
             self._apply_manual_fs_override()
             self.update_plot_data_with_filter()
             if self._get_plot_manual_fs_hz() is not None:
-                self.status.showMessage("X axis converted to time using manual Fs.", 2500)
+                self.status.showMessage("X ekseni manuel Fs kullanılarak zamana dönüştürüldü.", 2500)
             else:
-                self.status.showMessage("Manual Fs disabled; channel axes restored.", 2500)
+                self.status.showMessage("Manuel Fs devre dışı; kanal eksenleri geri yüklendi.", 2500)
 
     # ----- Preview -----
 
@@ -3650,7 +3650,7 @@ class MainWindow(QMainWindow):
             for i in range(tree.topLevelItemCount()):
                 tree.topLevelItem(i).setCheckState(0, Qt.CheckState.Unchecked)
             tree.blockSignals(False)
-        self.status.showMessage("All selections cleared.", 2000)
+        self.status.showMessage("Tüm seçimler temizlendi.", 2000)
 
     def _gather_checked_requests(self) -> List[ChannelRequest]:
         reqs: List[ChannelRequest] = []
@@ -3671,10 +3671,10 @@ class MainWindow(QMainWindow):
             return
         reqs = self._gather_checked_requests()
         if not reqs:
-            QMessageBox.information(self, "No Selection", "Check at least one channel (checkbox).")
+            QMessageBox.information(self, "Seçim Yok", "En az bir kanal işaretleyin (onay kutusu).")
             return
         files_payload = {fid: {"path": st.path, "label": st.label} for fid, st in self.files.items()}
-        self.status.showMessage("Loading channels...")
+        self.status.showMessage("Kanallar yükleniyor...")
         worker = MultiTdmsChannelLoadWorker(files_payload, reqs)
         self._start_job(worker, self._on_load_ready, tag="load", cancel_tags=["load", "lazy_view", "filter"])
 
@@ -3686,7 +3686,7 @@ class MainWindow(QMainWindow):
         self.clear_markers()
         self.update_plot_data_with_filter()
         self._refresh_series_comboboxes()
-        self.status.showMessage(f"{len(self.current_series)} channel(s) ready.", 3000)
+        self.status.showMessage(f"{len(self.current_series)} kanal hazır.", 3000)
 
     def _refresh_series_comboboxes(self) -> None:
         self.cmb_fft_channel.clear()
@@ -3777,7 +3777,7 @@ class MainWindow(QMainWindow):
         window_len = int(self.spin_smooth_win.value())
         self._filter_token += 1
         token = self._filter_token
-        self.status.showMessage("Filtering/rendering...")
+        self.status.showMessage("Filtreleniyor/çiziliyor...")
         series_snapshot = [dict(s) for s in self.current_series]
         worker = FilterWorker(token=token, series=series_snapshot, apply_filter=apply_filter, window_len=window_len)
         self._start_job(worker, self._on_filter_ready, tag="filter", cancel_tags=["filter"])
@@ -3790,7 +3790,7 @@ class MainWindow(QMainWindow):
             payload.get("axis_mode", "numeric"),
             payload.get("x_label", "X"),
         )
-        self.status.showMessage("Ready.", 1500)
+        self.status.showMessage("Hazır.", 1500)
 
     def on_clear_plot(self) -> None:
         self.plot_pane.clear_all()
@@ -3971,12 +3971,12 @@ class MainWindow(QMainWindow):
         self.marker_list.clear()
         self._markers.clear()
         self._marker_counter = 0
-        self.lbl_marker_calc.setText("Result: —")
+        self.lbl_marker_calc.setText("Sonuç: —")
 
     def _on_marker_requested_from(self, source: str, x: float, y: float) -> None:
         self._marker_counter += 1
         mid = self._marker_counter
-        label = f"Marker {mid}"
+        label = f"İşaret {mid}"
         self._markers[mid] = {"id": mid, "label": label, "x": x, "y": y}
 
         x_str = _format_x_display(self.plot_pane.axis_mode, x)
@@ -4000,7 +4000,7 @@ class MainWindow(QMainWindow):
     def _selected_two_markers(self) -> Optional[Tuple[dict, dict]]:
         items = self.marker_list.selectedItems()
         if len(items) != 2:
-            QMessageBox.information(self, "Selection", "Please select exactly 2 markers (CTRL+click).")
+            QMessageBox.information(self, "Seçim", "Lütfen tam olarak 2 işaret seçin (CTRL+tıklama).")
             return None
         ms = []
         for it in items:
@@ -4008,7 +4008,7 @@ class MainWindow(QMainWindow):
             if isinstance(mid, int) and mid in self._markers:
                 ms.append(self._markers[mid])
         if len(ms) != 2:
-            QMessageBox.information(self, "Selection", "Could not resolve 2 valid markers.")
+            QMessageBox.information(self, "Seçim", "2 geçerli işaret bulunamadı.")
             return None
         ms.sort(key=lambda m: m["id"])
         return ms[0], ms[1]
@@ -4019,10 +4019,10 @@ class MainWindow(QMainWindow):
             return
         a, b = pair
         mode = self.cmb_marker_calc_axis.currentText()
-        parts = [f"Result: {a['label']} + {b['label']}"]
-        if mode in ("X only", "X and Y"):
+        parts = [f"Sonuç: {a['label']} + {b['label']}"]
+        if mode in ("Yalnız X", "X ve Y"):
             parts.append(f"X={a['x'] + b['x']:.12g}")
-        if mode in ("Y only", "X and Y"):
+        if mode in ("Yalnız Y", "X ve Y"):
             parts.append(f"Y={a['y'] + b['y']:.12g}")
         self.lbl_marker_calc.setText("  |  ".join(parts))
 
@@ -4032,10 +4032,10 @@ class MainWindow(QMainWindow):
             return
         a, b = pair
         mode = self.cmb_marker_calc_axis.currentText()
-        parts = [f"Result: {b['label']} - {a['label']}"]
-        if mode in ("X only", "X and Y"):
+        parts = [f"Sonuç: {b['label']} - {a['label']}"]
+        if mode in ("Yalnız X", "X ve Y"):
             parts.append(f"\u0394X={b['x'] - a['x']:.12g}")
-        if mode in ("Y only", "X and Y"):
+        if mode in ("Yalnız Y", "X ve Y"):
             parts.append(f"\u0394Y={b['y'] - a['y']:.12g}")
         self.lbl_marker_calc.setText("  |  ".join(parts))
 
@@ -4044,11 +4044,11 @@ class MainWindow(QMainWindow):
     def export_csv(self) -> None:
         """Export currently plotted channel data to a CSV file."""
         if not self.current_series:
-            QMessageBox.information(self, "No Data", "Plot some channels first before exporting.")
+            QMessageBox.information(self, "Veri Yok", "Dışa aktarmadan önce kanalları çizin.")
             return
 
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export CSV", "", "CSV files (*.csv);;All files (*)",
+            self, "CSV Dışa Aktar", "", "CSV dosyaları (*.csv);;Tüm dosyalar (*)",
         )
         if not path:
             return
@@ -4073,9 +4073,9 @@ class MainWindow(QMainWindow):
                         writer.writerow([f"{xi:.12g}", f"{yi:.12g}"])
                     writer.writerow([])
 
-            self.status.showMessage(f"Exported to {os.path.basename(path)}", 3000)
+            self.status.showMessage(f"{os.path.basename(path)} dosyasına aktarıldı", 3000)
         except Exception as e:
-            QMessageBox.critical(self, "Export Error", f"Failed to export CSV:\n{e}")
+            QMessageBox.critical(self, "Dışa Aktarma Hatası", f"CSV dışa aktarma başarısız:\n{e}")
 
     # ----- FFT -----
 
@@ -4098,13 +4098,13 @@ class MainWindow(QMainWindow):
         self._last_fft_payload = None
         self.fft_plot.clear()
         apply_plotwidget_theme(self.fft_plot, self.plot_bg_rgb)
-        self.fft_plot.setLabel("bottom", "Frequency (Hz)")
-        self.fft_plot.setLabel("left", "Amplitude")
+        self.fft_plot.setLabel("bottom", "Frekans (Hz)")
+        self.fft_plot.setLabel("left", "Genlik")
         try:
             self.fft_plot.getPlotItem().setTitle("")
         except Exception:
             pass
-        self.lbl_fft_info.setText("Select a channel and compute FFT.")
+        self.lbl_fft_info.setText("Bir kanal seçin ve FFT hesaplayın.")
 
     def _rerender_fft_plot(self, *_: Any) -> None:
         if self._last_fft_payload:
@@ -4137,21 +4137,21 @@ class MainWindow(QMainWindow):
         apply_plotwidget_theme(self.fft_plot, self.plot_bg_rgb)
 
         if freq_p.size == 0:
-            self.fft_plot.setLabel("bottom", "Frequency (Hz)")
-            self.fft_plot.setLabel("left", "Amplitude")
+            self.fft_plot.setLabel("bottom", "Frekans (Hz)")
+            self.fft_plot.setLabel("left", "Genlik")
             try:
-                self.fft_plot.getPlotItem().setTitle("<b>FFT</b> — No data in selected range")
+                self.fft_plot.getPlotItem().setTitle("<b>FFT</b> — Seçili aralıkta veri yok")
             except Exception:
                 pass
-            self.lbl_fft_info.setText("No spectrum data in the selected frequency range.")
+            self.lbl_fft_info.setText("Seçili frekans aralığında spektrum verisi yok.")
             return
 
         if use_log:
             mag_plot = 20.0 * np.log10(np.maximum(mag_p, 1e-20))
-            ylab = "Amplitude (dB)"
+            ylab = "Genlik (dB)"
         else:
             mag_plot = mag_p
-            ylab = "Amplitude"
+            ylab = "Genlik"
 
         curve = self.fft_plot.plot(freq_p, mag_plot, pen=self._fft_curve_pen())
         try:
@@ -4164,7 +4164,7 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-        self.fft_plot.setLabel("bottom", "Frequency (Hz)")
+        self.fft_plot.setLabel("bottom", "Frekans (Hz)")
         self.fft_plot.setLabel("left", ylab)
 
         shown_fmin, shown_fmax = float(freq_p[0]), float(freq_p[-1])
@@ -4173,7 +4173,7 @@ class MainWindow(QMainWindow):
             f" &nbsp;|&nbsp; Fs={p['fs']:.6g} Hz"
             f" &nbsp;|&nbsp; \u0394f={p['df']:.6g} Hz"
             f" &nbsp;|&nbsp; N={p['n']}"
-            f" &nbsp;|&nbsp; Range: {shown_fmin:.6g}\u2013{shown_fmax:.6g} Hz"
+            f" &nbsp;|&nbsp; Aralık: {shown_fmin:.6g}\u2013{shown_fmax:.6g} Hz"
         )
         try:
             self.fft_plot.getPlotItem().setTitle(title)
@@ -4187,7 +4187,7 @@ class MainWindow(QMainWindow):
         if yr:
             self.fft_plot.setYRange(*yr, padding=0.0)
 
-        peak_text = "Peak marking disabled"
+        peak_text = "Tepe işaretleme devre dışı"
         if self.chk_fft_peak.isChecked() and freq_p.size > 0:
             try:
                 peak_idx = int(np.nanargmax(mag_p))
@@ -4203,25 +4203,25 @@ class MainWindow(QMainWindow):
                         pen=pg.mkPen(0, 0, 0, 0), brush=self._fft_peak_brush(),
                     )
                 )
-                peak_text = f"Dominant peak: {peak_freq:.6g} Hz | Amplitude: {peak_mag:.6g}"
+                peak_text = f"Baskın tepe: {peak_freq:.6g} Hz | Genlik: {peak_mag:.6g}"
             except Exception:
-                peak_text = "Peak detection failed"
+                peak_text = "Tepe algılama başarısız"
 
         preprocess = []
         if p.get("detrend_linear"):
-            preprocess.append("linear detrend")
+            preprocess.append("doğrusal trend kaldırma")
         elif p.get("remove_mean"):
-            preprocess.append("mean removed")
+            preprocess.append("ortalama kaldırıldı")
         if p.get("use_window"):
-            preprocess.append(p.get("window_name", "window"))
+            preprocess.append(p.get("window_name", "pencere"))
         if not preprocess:
-            preprocess.append("raw signal")
+            preprocess.append("ham sinyal")
 
         info = [
-            f"<b>Channel:</b> {p['name']}",
-            f"<b>Sampling:</b> {p['fs']:.6g} Hz &nbsp; <b>N:</b> {p['n']} &nbsp; <b>Resolution:</b> {p['df']:.6g} Hz",
-            f"<b>Preprocessing:</b> {', '.join(preprocess)}",
-            f"<b>Shown range:</b> {shown_fmin:.6g}\u2013{shown_fmax:.6g} Hz &nbsp; <b>Scale:</b> {ylab}",
+            f"<b>Kanal:</b> {p['name']}",
+            f"<b>Örnekleme:</b> {p['fs']:.6g} Hz &nbsp; <b>N:</b> {p['n']} &nbsp; <b>Çözünürlük:</b> {p['df']:.6g} Hz",
+            f"<b>Ön İşleme:</b> {', '.join(preprocess)}",
+            f"<b>Gösterilen aralık:</b> {shown_fmin:.6g}\u2013{shown_fmax:.6g} Hz &nbsp; <b>Ölçek:</b> {ylab}",
             f"<b>{peak_text}</b>",
         ]
         self.lbl_fft_info.setText("<br>".join(info))
@@ -4251,7 +4251,7 @@ class MainWindow(QMainWindow):
         fs_hint = None if fs_hint <= 0 else fs_hint
 
         name = f"{chosen.get('file_label', '')} | {chosen.get('name', '')}".strip(" |")
-        self.lbl_fft_info.setText("Computing FFT...")
+        self.lbl_fft_info.setText("FFT hesaplanıyor...")
 
         worker = FFTWorker(
             name=name, x=x, y=y, fs_hint=fs_hint,
