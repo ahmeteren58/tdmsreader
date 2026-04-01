@@ -60,7 +60,7 @@ from PyQt6.QtWidgets import (
     QTreeWidgetItem, QSplitter, QMessageBox, QStatusBar, QCheckBox, QGroupBox,
     QFormLayout, QDoubleSpinBox, QTabWidget, QComboBox, QButtonGroup, QSpinBox,
     QColorDialog, QGridLayout, QSizePolicy, QToolButton, QFrame,
-    QProgressBar,
+    QProgressBar, QMenu, QMenuBar, QDialog, QTextBrowser,
 )
 
 # ---------------------------------------------------------------------------
@@ -121,6 +121,7 @@ class AppConfig:
     pad_ratio: float = 0.06
     settings_org: str = "TDMSReader"
     settings_app: str = "TDMSReader"
+    max_recent_files: int = 10
 
 
 CFG = AppConfig()
@@ -2358,6 +2359,7 @@ class MainWindow(QMainWindow):
         self._preserve_detached_xrange: Optional[Tuple[float, float]] = None
 
         self._build_ui()
+        self._build_menu_bar()
         self.status = QStatusBar()
         self.setStatusBar(self.status)
         self._connect_signals()
@@ -2365,6 +2367,7 @@ class MainWindow(QMainWindow):
         self.set_theme(self._theme)
         self._restore_ui_state()
         self._apply_interaction_mode_to_all()
+        self._refresh_recent_menu()
 
         self.status.showMessage("Soldaki 'Aç' sekmesinden bir TDMS dosyası açın.")
 
@@ -2455,6 +2458,9 @@ class MainWindow(QMainWindow):
             self._apply_background_everywhere()
             if hasattr(self, "status") and self.status is not None:
                 self.status.showMessage(f"Tema: {'Koyu' if self._theme == 'dark' else 'Açık'}", 2000)
+            act = getattr(self, "_theme_menu_action", None)
+            if act is not None:
+                act.setText("Koyu Tema" if self._theme == "light" else "Açık Tema")
         finally:
             self._theme_guard = False
 
@@ -2462,6 +2468,221 @@ class MainWindow(QMainWindow):
         sender = self.sender()
         want_dark = bool(getattr(sender, "isChecked", lambda: True)())
         self.set_theme("dark" if want_dark else "light")
+
+    # ----- Menu bar -----
+
+    def _build_menu_bar(self) -> None:
+        mb = self.menuBar()
+
+        file_menu = mb.addMenu("Dosya")
+        act = file_menu.addAction("TDMS Aç...")
+        act.setShortcut(QKeySequence.StandardKey.Open)
+        act.triggered.connect(self.open_tdms)
+
+        self._recent_menu = file_menu.addMenu("Son Açılanlar")
+
+        file_menu.addSeparator()
+        act = file_menu.addAction("CSV Dışa Aktar")
+        act.setShortcut(QKeySequence("Ctrl+E"))
+        act.triggered.connect(self.export_csv)
+        act = file_menu.addAction("Grafiği Kaydet")
+        act.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        act.triggered.connect(self.save_plot_image)
+        file_menu.addSeparator()
+        act = file_menu.addAction("Sekmeyi Kapat")
+        act.setShortcut(QKeySequence.StandardKey.Close)
+        act.triggered.connect(lambda: self._close_file_tab(self.file_tabs.currentIndex()))
+        file_menu.addSeparator()
+        act = file_menu.addAction("Çıkış")
+        act.setShortcut(QKeySequence("Ctrl+Q"))
+        act.triggered.connect(self.close)
+
+        view_menu = mb.addMenu("Görünüm")
+        act = view_menu.addAction("Koyu Tema" if self._theme == "light" else "Açık Tema")
+        act.triggered.connect(lambda: self.set_theme("dark" if self._theme == "light" else "light"))
+        self._theme_menu_action = act
+        view_menu.addSeparator()
+        act = view_menu.addAction("Otomatik Sığdır")
+        act.triggered.connect(self._autofit_all_panes)
+        act = view_menu.addAction("Grafiği Temizle")
+        act.triggered.connect(self.on_clear_plot)
+        act = view_menu.addAction("Grafiği Ayır / Geri Bağla")
+        act.triggered.connect(self.toggle_detach_plot)
+
+        help_menu = mb.addMenu("Yardım")
+        act = help_menu.addAction("Klavye Kısayolları")
+        act.setShortcut(QKeySequence("F1"))
+        act.triggered.connect(self.show_shortcuts_dialog)
+        act = help_menu.addAction("Hakkında")
+        act.triggered.connect(self._show_about_dialog)
+
+    # ----- Recent files -----
+
+    def _get_recent_files(self) -> List[str]:
+        try:
+            raw = self.settings.value("paths/recent_files", [])
+            if isinstance(raw, list):
+                return [str(p) for p in raw if p and os.path.isfile(str(p))]
+            if isinstance(raw, str) and raw:
+                return [raw] if os.path.isfile(raw) else []
+        except Exception:
+            pass
+        return []
+
+    def _add_to_recent(self, path: str) -> None:
+        try:
+            abs_p = os.path.abspath(path)
+            recent = self._get_recent_files()
+            recent = [p for p in recent if os.path.abspath(p) != abs_p]
+            recent.insert(0, abs_p)
+            recent = recent[:CFG.max_recent_files]
+            self.settings.setValue("paths/recent_files", recent)
+            self._refresh_recent_menu()
+        except Exception:
+            logger.debug("Recent file tracking failed", exc_info=True)
+
+    def _refresh_recent_menu(self) -> None:
+        menu = getattr(self, "_recent_menu", None)
+        if menu is None:
+            return
+        menu.clear()
+        recent = self._get_recent_files()
+        if not recent:
+            act = menu.addAction("(boş)")
+            act.setEnabled(False)
+            return
+        for p in recent:
+            display = os.path.basename(p)
+            act = menu.addAction(f"{display}  —  {p}")
+            act.triggered.connect(lambda checked, path=p: self.open_tdms_path(path))
+        menu.addSeparator()
+        act = menu.addAction("Listeyi Temizle")
+        act.triggered.connect(self._clear_recent_files)
+
+    def _clear_recent_files(self) -> None:
+        self.settings.setValue("paths/recent_files", [])
+        self._refresh_recent_menu()
+
+    # ----- Statistics panel -----
+
+    def _refresh_statistics(self) -> None:
+        if not self.current_series:
+            for lbl in (self.s_min, self.s_max, self.s_mean, self.s_std, self.s_rms, self.s_pp):
+                lbl.setText("—")
+            return
+
+        all_y: List[np.ndarray] = []
+        for s in self.current_series:
+            y = np.asarray(s.get("y", []), dtype=np.float64)
+            y = y[np.isfinite(y)]
+            if y.size > 0:
+                all_y.append(y)
+
+        if not all_y:
+            for lbl in (self.s_min, self.s_max, self.s_mean, self.s_std, self.s_rms, self.s_pp):
+                lbl.setText("—")
+            return
+
+        combined = np.concatenate(all_y) if len(all_y) > 1 else all_y[0]
+        ymin = float(np.min(combined))
+        ymax = float(np.max(combined))
+        ymean = float(np.mean(combined))
+        ystd = float(np.std(combined))
+        yrms = float(np.sqrt(np.mean(combined ** 2)))
+        ypp = ymax - ymin
+
+        self.s_min.setText(f"{ymin:.6g}")
+        self.s_max.setText(f"{ymax:.6g}")
+        self.s_mean.setText(f"{ymean:.6g}")
+        self.s_std.setText(f"{ystd:.6g}")
+        self.s_rms.setText(f"{yrms:.6g}")
+        self.s_pp.setText(f"{ypp:.6g}")
+
+    # ----- Plot image export -----
+
+    def save_plot_image(self) -> None:
+        if self.plot_pane.plot is None:
+            QMessageBox.information(self, "Grafik Yok", "Kaydedilecek grafik yok.")
+            return
+
+        path, selected_filter = QFileDialog.getSaveFileName(
+            self, "Grafiği Kaydet", "",
+            "PNG resmi (*.png);;SVG vektör (*.svg);;Tüm dosyalar (*)",
+        )
+        if not path:
+            return
+
+        try:
+            import pyqtgraph.exporters as exporters
+
+            if path.lower().endswith(".svg"):
+                exporter = exporters.SVGExporter(self.plot_pane.plot.getPlotItem())
+            else:
+                if not path.lower().endswith(".png"):
+                    path += ".png"
+                exporter = exporters.ImageExporter(self.plot_pane.plot.getPlotItem())
+                exporter.parameters()["width"] = 1920
+
+            exporter.export(path)
+            self.status.showMessage(f"Grafik kaydedildi: {os.path.basename(path)}", 3000)
+        except Exception as e:
+            QMessageBox.critical(self, "Kaydetme Hatası", f"Grafik kaydedilemedi:\n{e}")
+
+    # ----- Shortcuts dialog -----
+
+    def show_shortcuts_dialog(self) -> None:
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Klavye Kısayolları")
+        dlg.resize(480, 420)
+        lay = QVBoxLayout(dlg)
+        browser = QTextBrowser()
+        browser.setOpenExternalLinks(False)
+        browser.setHtml(
+            "<style>"
+            "table { border-collapse: collapse; width: 100%; }"
+            "th, td { text-align: left; padding: 6px 12px; border-bottom: 1px solid #ccc; }"
+            "th { font-weight: bold; background: #f0f0f0; }"
+            "kbd { background: #e8e8e8; border: 1px solid #bbb; border-radius: 3px;"
+            "      padding: 1px 6px; font-family: monospace; }"
+            "</style>"
+            "<h3>Klavye Kısayolları</h3>"
+            "<table>"
+            "<tr><th>Kısayol</th><th>İşlev</th></tr>"
+            "<tr><td><kbd>Ctrl+O</kbd></td><td>TDMS dosyası aç</td></tr>"
+            "<tr><td><kbd>Ctrl+W</kbd></td><td>Geçerli sekmeyi kapat</td></tr>"
+            "<tr><td><kbd>Ctrl+E</kbd></td><td>CSV dışa aktar</td></tr>"
+            "<tr><td><kbd>Ctrl+Shift+S</kbd></td><td>Grafiği resim olarak kaydet</td></tr>"
+            "<tr><td><kbd>Ctrl+Q</kbd></td><td>Uygulamadan çık</td></tr>"
+            "<tr><td><kbd>F1</kbd></td><td>Bu diyalogu göster</td></tr>"
+            "<tr><td colspan='2'><br><b>Grafik Etkileşimi</b></td></tr>"
+            "<tr><td>Sol Fare Sürükleme</td><td>Kaydır / Yakınlaştır (moda göre)</td></tr>"
+            "<tr><td>Fare Tekerleği</td><td>Yakınlaştır / Uzaklaştır</td></tr>"
+            "<tr><td>Sağ Tık Sürükle</td><td>Eksenleri ölçekle</td></tr>"
+            "<tr><td>Sürükle & Bırak</td><td>TDMS dosyasını sürükleyip bırakarak aç</td></tr>"
+            "</table>"
+        )
+        lay.addWidget(browser)
+        btn_close = QPushButton("Kapat")
+        btn_close.clicked.connect(dlg.accept)
+        lay.addWidget(btn_close, alignment=Qt.AlignmentFlag.AlignRight)
+        dlg.exec()
+
+    def _show_about_dialog(self) -> None:
+        QMessageBox.about(
+            self, "Hakkında — TDMS Okuyucu",
+            "<h3>TDMS Okuyucu</h3>"
+            "<p>NI TDMS dosyaları için DIAdem benzeri görüntüleyici.</p>"
+            "<p><b>Özellikler:</b></p>"
+            "<ul>"
+            "<li>Çoklu dosya desteği</li>"
+            "<li>Zaman ve frekans analizi (FFT)</li>"
+            "<li>Savitzky-Golay yumuşatma</li>"
+            "<li>Dijital kanal gösterimi</li>"
+            "<li>CSV ve grafik dışa aktarma</li>"
+            "<li>Koyu / Açık tema</li>"
+            "</ul>"
+            "<p>PyQt6 + pyqtgraph ile geliştirilmiştir.</p>"
+        )
 
     # ----- UI build -----
 
@@ -2548,6 +2769,26 @@ class MainWindow(QMainWindow):
         pf.addRow("Büyüklük:", self.p_quantity)
         pf.addRow("Birim:", self.p_unit)
         left_layout.addWidget(self.preview_box)
+
+        self.stats_box = QGroupBox("Veri İstatistikleri")
+        sf = QFormLayout(self.stats_box)
+        sf.setVerticalSpacing(6)
+        sf.setHorizontalSpacing(10)
+        self.s_min = QLabel("—")
+        self.s_max = QLabel("—")
+        self.s_mean = QLabel("—")
+        self.s_std = QLabel("—")
+        self.s_rms = QLabel("—")
+        self.s_pp = QLabel("—")
+        for lbl in (self.s_min, self.s_max, self.s_mean, self.s_std, self.s_rms, self.s_pp):
+            lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        sf.addRow("Min:", self.s_min)
+        sf.addRow("Maks:", self.s_max)
+        sf.addRow("Ortalama:", self.s_mean)
+        sf.addRow("Std Sapma:", self.s_std)
+        sf.addRow("RMS:", self.s_rms)
+        sf.addRow("Tepe-Tepe:", self.s_pp)
+        left_layout.addWidget(self.stats_box)
 
         splitter.addWidget(left)
 
@@ -2637,6 +2878,8 @@ class MainWindow(QMainWindow):
         self.btn_detach = QPushButton("Grafiği Ayır")
         self.btn_export_csv = QPushButton("CSV Dışa Aktar")
         self.btn_export_csv.setToolTip("Mevcut çizili kanal verilerini CSV olarak dışa aktar")
+        self.btn_save_plot_img = QPushButton("Grafiği Kaydet")
+        self.btn_save_plot_img.setToolTip("Grafiği PNG/SVG olarak kaydet (Ctrl+Shift+S)")
         self._set_bg_button_preview(self.plot_bg_rgb)
 
         rg.addWidget(self.chk_region, 0, 0)
@@ -2649,6 +2892,7 @@ class MainWindow(QMainWindow):
         rg.addWidget(self.btn_bg_reset, 1, 2, 1, 2)
         rg.addWidget(self.btn_detach, 1, 4)
         rg.addWidget(self.btn_export_csv, 1, 5)
+        rg.addWidget(self.btn_save_plot_img, 2, 0, 1, 2)
         self.ctrl_tabs.addTab(tab_range, "Aralık")
 
         # Tab: Markers
@@ -2912,6 +3156,7 @@ class MainWindow(QMainWindow):
         self.btn_bg_reset.clicked.connect(self.reset_background_color)
         self.btn_detach.clicked.connect(self.toggle_detach_plot)
         self.btn_export_csv.clicked.connect(self.export_csv)
+        self.btn_save_plot_img.clicked.connect(self.save_plot_image)
 
         self.btn_fft.clicked.connect(self.compute_fft)
         self.btn_fft_clear.clicked.connect(self.clear_fft_plot)
@@ -3331,6 +3576,11 @@ class MainWindow(QMainWindow):
             act_export.setShortcut(QKeySequence("Ctrl+E"))
             act_export.triggered.connect(self.export_csv)
             self.addAction(act_export)
+
+            act_save_img = QAction(self)
+            act_save_img.setShortcut(QKeySequence("Ctrl+Shift+S"))
+            act_save_img.triggered.connect(self.save_plot_image)
+            self.addAction(act_save_img)
         except Exception:
             logger.debug("Shortcut installation failed", exc_info=True)
 
@@ -3383,6 +3633,7 @@ class MainWindow(QMainWindow):
             self.settings.setValue("paths/last_dir", os.path.dirname(path))
         except Exception:
             pass
+        self._add_to_recent(path)
 
         abs_path = os.path.abspath(path)
         for fid, st in self.files.items():
@@ -3686,6 +3937,7 @@ class MainWindow(QMainWindow):
         self.clear_markers()
         self.update_plot_data_with_filter()
         self._refresh_series_comboboxes()
+        self._refresh_statistics()
         self.status.showMessage(f"{len(self.current_series)} kanal hazır.", 3000)
 
     def _refresh_series_comboboxes(self) -> None:
@@ -3800,6 +4052,7 @@ class MainWindow(QMainWindow):
         self.cmb_fft_channel.clear()
         self.cmb_style_series.clear()
         self.clear_markers()
+        self._refresh_statistics()
 
     # ----- Range -----
 
