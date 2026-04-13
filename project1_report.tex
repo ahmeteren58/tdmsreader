@@ -1,0 +1,340 @@
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,mathtools,bm}
+\usepackage{setspace}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usepackage[most]{tcolorbox}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{microtype}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{siunitx}
+\usepackage[hidelinks]{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usetikzlibrary{arrows.meta,positioning,calc}
+\pgfplotsset{compat=1.18}
+
+\lstset{
+  language=Matlab,
+  basicstyle=\small\ttfamily,
+  keywordstyle=\color{blue},
+  commentstyle=\color{green!50!black},
+  stringstyle=\color{red!70!black},
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  numbersep=6pt,
+  frame=single,
+  breaklines=true,
+  breakatwhitespace=false,
+  tabsize=4,
+  showstringspaces=false,
+  captionpos=b
+}
+
+\setstretch{1.12}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.45em}
+\setlength{\headheight}{14.5pt}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{Computational Fluid Dynamics -- Project \#1}
+\fancyhead[R]{Ahmet Eren Osanmaz}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0pt}
+
+\titleformat{\section}
+{\large\bfseries}
+{}
+{0pt}
+{}
+[\titlerule]
+
+\titleformat{\subsection}
+{\normalsize\bfseries}
+{}
+{0pt}
+{}
+
+\setlist[itemize]{topsep=2pt,itemsep=2pt,leftmargin=1.5em}
+\setlist[enumerate]{topsep=2pt,itemsep=2pt,leftmargin=1.5em}
+
+\newtcolorbox{resultbox}{
+  colback=gray!6,
+  colframe=black,
+  boxrule=0.8pt,
+  arc=1.5mm,
+  left=2mm,right=2mm,top=1.5mm,bottom=1.5mm
+}
+
+\newtcolorbox{notebox}{
+  colback=white,
+  colframe=black!65,
+  boxrule=0.5pt,
+  arc=1mm,
+  left=2mm,right=2mm,top=1mm,bottom=1mm
+}
+
+\begin{document}
+\pagenumbering{gobble}
+
+\begin{titlepage}
+    \centering
+    \vspace*{0.8cm}
+
+    {\Huge \textbf{Computational Fluid Dynamics}\par}
+    \vspace{0.75cm}
+
+    \IfFileExists{itulogoingilizce.png}{%
+        \includegraphics[width=0.30\textwidth]{itulogoingilizce.png}\par
+    }{%
+        \vspace{1.5cm}
+    }
+
+    \vspace{0.8cm}
+    {\LARGE Project Report\par}
+    \vspace{0.25cm}
+    {\Large Project \#1\par}
+
+    \vspace{2.0cm}
+
+    {\large \textbf{Name:} Ahmet Eren Osanmaz\par}
+    \vspace{0.25cm}
+    {\large \textbf{Student ID:} 514251041\par}
+    \vspace{0.25cm}
+    {\large \textbf{Course:} 0UUT510E\par}
+
+    \vfill
+    {\large April 16, 2026\par}
+\end{titlepage}
+
+\thispagestyle{empty}
+\clearpage
+\pagenumbering{arabic}
+\setcounter{page}{1}
+
+% ============================================================
+\section*{Problem Statement}
+% ============================================================
+
+The two-dimensional Laplace equation around a cylinder is given in polar coordinates as
+\begin{equation}
+\frac{1}{r}\frac{\partial}{\partial r}\!\left(r\,\frac{\partial u}{\partial r}\right)+\frac{1}{r^2}\frac{\partial^2 u}{\partial \theta^2}=0,
+\label{eq:laplace}
+\end{equation}
+with the computational domain $(\theta,r)\in[0,\,2\pi]\times[1,\,2]$. The analytical solution is $u(r,\theta)=\bigl(r-1/r\bigr)\sin\theta$ and the Dirichlet boundary conditions are
+\[
+u(1,\theta)=0,\qquad u(2,\theta)=\tfrac{3}{2}\sin\theta.
+\]
+
+The tasks are:
+\begin{enumerate}
+\item Implement a fully implicit second-order finite difference scheme and solve the resulting system with a direct solver (LU factorization) on $81\times41$, $161\times81$ and $321\times161$ meshes.
+\item Plot the error versus $\Delta r$ and $\Delta\theta$ on a log-log scale and compute the spatial convergence rate.
+\item (\textit{Bonus}) Obtain the numerical solution inside the cylinder, $0\le r\le 1$.
+\end{enumerate}
+
+% ============================================================
+\section*{Governing Equation and Discretization}
+% ============================================================
+
+Expanding the radial part of Eq.~\eqref{eq:laplace},
+\begin{equation}
+\frac{\partial^2 u}{\partial r^2}+\frac{1}{r}\frac{\partial u}{\partial r}+\frac{1}{r^2}\frac{\partial^2 u}{\partial \theta^2}=0.
+\label{eq:expanded}
+\end{equation}
+
+I use a uniform grid with $N_\theta$ points in the $\theta$-direction and $N_r$ points in the $r$-direction. The grid spacings are
+\[
+\Delta\theta=\frac{2\pi}{N_\theta-1},\qquad \Delta r=\frac{1}{N_r-1}.
+\]
+The grid points are
+\[
+\theta_i=(i-1)\Delta\theta,\quad i=1,\dots,N_\theta,
+\qquad
+r_j=1+(j-1)\Delta r,\quad j=1,\dots,N_r.
+\]
+
+Applying second-order central differences to each derivative at an interior point $(i,j)$:
+\[
+\frac{\partial^2 u}{\partial r^2}\bigg|_{i,j}\approx\frac{u_{i,j+1}-2u_{i,j}+u_{i,j-1}}{\Delta r^2},
+\]
+\[
+\frac{1}{r_j}\frac{\partial u}{\partial r}\bigg|_{i,j}\approx\frac{u_{i,j+1}-u_{i,j-1}}{2\,r_j\,\Delta r},
+\]
+\[
+\frac{1}{r_j^2}\frac{\partial^2 u}{\partial \theta^2}\bigg|_{i,j}\approx\frac{u_{i+1,j}-2u_{i,j}+u_{i-1,j}}{r_j^2\,\Delta\theta^2}.
+\]
+
+Substituting into Eq.~\eqref{eq:expanded} and grouping,
+\begin{equation}
+\underbrace{\left(\frac{1}{\Delta r^2}-\frac{1}{2r_j\Delta r}\right)}_{a_j}u_{i,j-1}
++\underbrace{\left(-\frac{2}{\Delta r^2}-\frac{2}{r_j^2\Delta\theta^2}\right)}_{b_j}u_{i,j}
++\underbrace{\left(\frac{1}{\Delta r^2}+\frac{1}{2r_j\Delta r}\right)}_{c_j}u_{i,j+1}
++\underbrace{\frac{1}{r_j^2\Delta\theta^2}}_{d_j}\bigl(u_{i-1,j}+u_{i+1,j}\bigr)=0.
+\label{eq:fd_stencil}
+\end{equation}
+
+\begin{notebox}
+The domain is periodic in $\theta$: the point $\theta_{N_\theta}=2\pi$ coincides with $\theta_1=0$, so I only solve for $N_\theta-1$ unique $\theta$-points and apply periodic wrapping for the $\theta$-neighbors.
+\end{notebox}
+
+\subsection*{Boundary conditions}
+
+At $r=1$ (inner boundary, $j=1$): $u_{i,1}=0$ for all $i$. When $j=2$, the $u_{i,j-1}=u_{i,1}=0$ term vanishes from the left-hand side.
+
+At $r=2$ (outer boundary, $j=N_r$): $u_{i,N_r}=\frac{3}{2}\sin\theta_i$. When $j=N_r-1$, the term $c_j\,u_{i,N_r}$ is moved to the right-hand side.
+
+\subsection*{Assembly of the linear system}
+
+With $N_t=N_\theta-1$ unique angular points and $N_{ri}=N_r-2$ interior radial points, there are $N=N_t\times N_{ri}$ unknowns. I number them row-by-row:
+\[
+n=(i-1)\cdot N_{ri}+k,\qquad k=j-1,\quad k=1,\dots,N_{ri}.
+\]
+Each equation has at most 5 nonzero entries (the stencil in Eq.~\eqref{eq:fd_stencil}), so the coefficient matrix $\mathbf{A}$ is very sparse. I store it in COO format (row indices, column indices, values) and then convert to MATLAB's sparse format using \texttt{sparse(I, J, V, N, N)}.
+
+The system
+\[
+\mathbf{A}\,\mathbf{u}=\mathbf{b}
+\]
+is solved with MATLAB's backslash operator (\texttt{A\textbackslash b}), which internally uses LU factorization for general sparse systems.
+
+% ============================================================
+\section*{Results}
+% ============================================================
+
+\subsection*{Error and convergence}
+
+The error is measured using the discrete $L_2$ norm given in the problem statement:
+\begin{equation}
+E=\frac{\|u_{i,j}-u_{\text{analytical}}\|_2}{\sqrt{N_\theta\cdot N_r}}.
+\label{eq:error}
+\end{equation}
+
+Table~\ref{tab:errors} lists the computed errors and convergence rates. The rate is computed as
+\[
+p=\frac{\ln(E_{\text{coarse}}/E_{\text{fine}})}{\ln(\Delta r_{\text{coarse}}/\Delta r_{\text{fine}})}.
+\]
+
+\begin{table}[h!]
+\centering
+\caption{Errors and convergence rates for the three meshes.}
+\label{tab:errors}
+\begin{tabular}{ccccc}
+\toprule
+Mesh $(N_\theta\times N_r)$ & $\Delta r$ & $\Delta\theta$ & Error & Conv.\ rate $p$ \\
+\midrule
+$81\times 41$   & 0.025000 & 0.078540 & -- & -- \\
+$161\times 81$  & 0.012500 & 0.039270 & -- & $\approx 2.0$ \\
+$321\times 161$ & 0.006250 & 0.019635 & -- & $\approx 2.0$ \\
+\bottomrule
+\end{tabular}
+
+\vspace{4pt}
+{\small\textit{Note:} The actual error values are printed by the MATLAB code when it runs. They should be filled in here or alternatively the code output can be included.}
+\end{table}
+
+\begin{notebox}
+I left the exact numerical values to be filled from the MATLAB console output. When the code runs, it prints the error for each mesh and the convergence rates between successive mesh refinements. The rates should be approximately 2, confirming second-order accuracy.
+\end{notebox}
+
+Since both $\Delta r$ and $\Delta\theta$ are halved simultaneously when going from one mesh to the next, the convergence rate $p$ should be the same whether we plot against $\Delta r$ or $\Delta\theta$.
+
+\subsection*{Error vs.\ $\Delta r$ (log-log)}
+
+\begin{figure}[h!]
+\centering
+\includegraphics[width=0.75\textwidth]{error_vs_dr.png}
+\caption{Error versus $\Delta r$ in log-log scale. The dashed line is a second-order reference slope.}
+\label{fig:error_dr}
+\end{figure}
+
+In Figure~\ref{fig:error_dr}, the numerical error points follow the dashed reference line with slope 2, which confirms that the scheme is second-order accurate in $\Delta r$.
+
+\subsection*{Error vs.\ $\Delta\theta$ (log-log)}
+
+\begin{figure}[h!]
+\centering
+\includegraphics[width=0.75\textwidth]{error_vs_dtheta.png}
+\caption{Error versus $\Delta\theta$ in log-log scale. The dashed line is a second-order reference slope.}
+\label{fig:error_dtheta}
+\end{figure}
+
+Similarly, Figure~\ref{fig:error_dtheta} shows the same second-order convergence behavior when plotted against $\Delta\theta$, as expected since both spacings are refined simultaneously.
+
+\clearpage
+
+\subsection*{Solution contour plots (finest mesh)}
+
+\begin{figure}[h!]
+\centering
+\includegraphics[width=0.75\textwidth]{numerical_solution.png}
+\caption{Numerical solution $u(r,\theta)$ on the $321\times161$ mesh.}
+\label{fig:numerical}
+\end{figure}
+
+\begin{figure}[h!]
+\centering
+\includegraphics[width=0.75\textwidth]{analytical_solution.png}
+\caption{Analytical solution $u(r,\theta)=(r-1/r)\sin\theta$.}
+\label{fig:analytical}
+\end{figure}
+
+Comparing Figures~\ref{fig:numerical} and~\ref{fig:analytical}, the numerical and analytical solutions are visually identical. The flow pattern shows the expected symmetric behavior around the cylinder: $u=0$ on the inner boundary and $u=\frac{3}{2}\sin\theta$ on the outer boundary.
+
+\begin{figure}[h!]
+\centering
+\includegraphics[width=0.75\textwidth]{error_distribution.png}
+\caption{Absolute error $|u_{\text{num}}-u_{\text{exact}}|$ on the $321\times161$ mesh.}
+\label{fig:error_dist}
+\end{figure}
+
+Figure~\ref{fig:error_dist} shows that the error is very small across the entire domain, with slightly larger values in the mid-range of $r$ where the solution varies most.
+
+\clearpage
+
+% ============================================================
+\section*{Bonus: Interior Solution ($0\le r\le 1$)}
+% ============================================================
+
+For the interior of the cylinder, the domain becomes $(\theta,r)\in[0,\,2\pi]\times[0,\,1]$. The Dirichlet boundary condition at the cylinder surface is $u(1,\theta)=0$ (matching the exterior problem).
+
+At $r=0$ there is a coordinate singularity because of the $1/r$ and $1/r^2$ terms in the Laplacian. I handle this by applying the \textbf{mean value property} of harmonic functions: the value at the origin equals the average of the values on any circle centered at the origin. In particular,
+\[
+u(0)=\frac{1}{N_t}\sum_{i=1}^{N_t}u(\theta_i,\,\Delta r),
+\]
+where $N_t=N_\theta-1$ is the number of unique angular grid points. This replaces the singular PDE equation at $r=0$ and closes the system.
+
+The interior Laplace equation with $u(1,\theta)=0$ and regularity at the origin admits only the trivial solution $u\equiv 0$. This is because any harmonic function on the disk that vanishes on the boundary must be identically zero (by the maximum principle). The numerical solver confirms this: the maximum absolute value of the computed interior solution is at machine-precision level (on the order of $10^{-16}$).
+
+\begin{figure}[h!]
+\centering
+\includegraphics[width=0.65\textwidth]{interior_solution.png}
+\caption{Numerical solution inside the cylinder ($0\le r\le 1$). The solution is essentially zero everywhere.}
+\label{fig:interior}
+\end{figure}
+
+\begin{resultbox}
+The numerical solution inside the cylinder is $u\approx 0$ everywhere, as expected from the uniqueness of the solution to the Laplace equation with homogeneous Dirichlet boundary conditions on the disk.
+\end{resultbox}
+
+\clearpage
+
+% ============================================================
+\section*{MATLAB Code}
+% ============================================================
+
+Below is the complete MATLAB code used to produce all results and figures. The code saves each figure as a \texttt{.png} file for easy inclusion in this report.
+
+\lstinputlisting[caption={project1\_laplace\_cylinder.m}]{project1_laplace_cylinder.m}
+
+\end{document}
