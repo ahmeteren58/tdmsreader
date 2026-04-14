@@ -194,6 +194,14 @@ QToolButton#btnCtrlCollapse:hover { background: #F1F3F6; }
 QToolButton#btnCtrlCollapse:pressed { background: #E9ECF0; }
 QProgressBar { border: 1px solid #C9CED6; border-radius: 6px; background: #F1F3F6; text-align: center; }
 QProgressBar::chunk { background: #2ECC71; border-radius: 5px; }
+QMenuBar { background: #F6F7F9; border-bottom: 1px solid #D7DBE0; padding: 2px; }
+QMenuBar::item { padding: 6px 12px; border-radius: 6px; color: #222; }
+QMenuBar::item:selected { background: #EEF1F4; }
+QMenuBar::item:pressed { background: #E9ECF0; }
+QMenu { background: #FFFFFF; border: 1px solid #D7DBE0; border-radius: 8px; padding: 4px; }
+QMenu::item { padding: 6px 28px 6px 12px; border-radius: 4px; color: #222; }
+QMenu::item:selected { background: #EEF1F4; }
+QMenu::separator { height: 1px; background: #D7DBE0; margin: 4px 8px; }
 """
 
 DARK_QSS = """
@@ -231,6 +239,14 @@ QToolButton#btnCtrlCollapse:hover { background: #20273A; }
 QToolButton#btnCtrlCollapse:pressed { background: #1B2131; }
 QProgressBar { border: 1px solid #3A4253; border-radius: 6px; background: #1A2030; color: #E8EAF0; text-align: center; }
 QProgressBar::chunk { background: #2ECC71; border-radius: 5px; }
+QMenuBar { background: #0F1115; border-bottom: 1px solid #2A2F3A; padding: 2px; }
+QMenuBar::item { padding: 6px 12px; border-radius: 6px; color: #E8EAF0; }
+QMenuBar::item:selected { background: #1D2230; }
+QMenuBar::item:pressed { background: #2A3550; }
+QMenu { background: #141824; border: 1px solid #2A2F3A; border-radius: 8px; padding: 4px; }
+QMenu::item { padding: 6px 28px 6px 12px; border-radius: 4px; color: #E8EAF0; }
+QMenu::item:selected { background: #222A3D; }
+QMenu::separator { height: 1px; background: #2A2F3A; margin: 4px 8px; }
 """
 
 
