@@ -1823,7 +1823,7 @@ class PlotPane(QWidget):
         right_mins: List[float] = []
         right_maxs: List[float] = []
 
-        def _make_label(s: dict, is_dig: bool = False, x_shift: float = 0.0) -> str:
+        def _make_label(s: dict, is_dig: bool = False, x_shift: float = 0.0, y_shift: float = 0.0) -> str:
             parts = []
             fl = (s.get("file_label") or "").strip()
             nm = (s.get("name") or "").strip()
@@ -1841,23 +1841,27 @@ class PlotPane(QWidget):
                 parts[0] += " [DİJ]"
             if x_shift != 0.0:
                 parts[0] += f" (x{x_shift:+g})"
+            if y_shift != 0.0:
+                parts[0] += f" (y{y_shift:+g})"
             return parts[0]
 
-        def _get_style(skey: str) -> Tuple[Any, float, float]:
+        def _get_style(skey: str) -> Tuple[Any, float, float, float]:
             st = smap.get(skey, {})
             color = st.get("color")
             width = float(st.get("width", 2.0))
             xs = float(st.get("x_shift", 0.0) or 0.0)
-            return color, width, xs if math.isfinite(xs) else 0.0
+            ys = float(st.get("y_shift", 0.0) or 0.0)
+            return color, width, xs if math.isfinite(xs) else 0.0, ys if math.isfinite(ys) else 0.0
 
         # Analog
         for s in analog:
             skey = s.get("style_key", "")
-            color, width, x_shift = _get_style(skey)
+            color, width, x_shift, y_shift = _get_style(skey)
             x_raw = s["x"]
             x = (np.asarray(x_raw, dtype=np.float64) + x_shift) if x_shift else x_raw
-            y = s["y"]
-            label = _make_label(s, x_shift=x_shift)
+            y_raw = s["y"]
+            y = (np.asarray(y_raw, dtype=np.float64) + y_shift) if y_shift else y_raw
+            label = _make_label(s, x_shift=x_shift, y_shift=y_shift)
 
             pen_color = color if color is not None else pg.intColor(i_global, hues=max(1, n_total))
             pen = pg.mkPen(pen_color, width=width)
@@ -1888,10 +1892,11 @@ class PlotPane(QWidget):
                 break
 
             skey = s.get("style_key", "")
-            color, width, x_shift = _get_style(skey)
+            color, width, x_shift, y_shift = _get_style(skey)
             x_raw = s["x"]
             x = (np.asarray(x_raw, dtype=np.float64) + x_shift) if x_shift else x_raw
-            y = s["y"]
+            y_raw = s["y"]
+            y = (np.asarray(y_raw, dtype=np.float64) + y_shift) if y_shift else y_raw
 
             levels = s.get("digital_levels")
             if isinstance(levels, (tuple, list)) and len(levels) == 2:
@@ -1916,7 +1921,7 @@ class PlotPane(QWidget):
                 except Exception:
                     pass
 
-            label = _make_label(s, is_dig=True, x_shift=x_shift)
+            label = _make_label(s, is_dig=True, x_shift=x_shift, y_shift=y_shift)
             pen_color = color if color is not None else pg.intColor(i_global, hues=max(1, n_total))
             pen = pg.mkPen(pen_color, width=width)
             item = self._plot_digital_step(x, y, pen, viewbox=self._right_vb)
@@ -2333,7 +2338,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("TDMS Okuyucu")
+        self.setWindowTitle("TDMSReader AKBGB ©")
         self.resize(1560, 920)
 
         self.settings = QSettings(CFG.settings_org, CFG.settings_app)
@@ -2982,10 +2987,30 @@ class MainWindow(QMainWindow):
         self.sp_x_shift.setKeyboardTracking(False)
         self.sp_x_shift.setToolTip("Kanal başına X kaydırma. Zaman eksenleri için saniye, indeks için örnek sayısı.")
 
+        self.sp_y_shift = QDoubleSpinBox()
+        self.sp_y_shift.setRange(-1e18, 1e18)
+        self.sp_y_shift.setDecimals(6)
+        self.sp_y_shift.setSingleStep(0.1)
+        self.sp_y_shift.setValue(0.0)
+        self.sp_y_shift.setKeyboardTracking(False)
+        self.sp_y_shift.setToolTip("Kanal başına Y kaydırma. Dikey ofset değeri.")
+
         self.btn_style_apply = QPushButton("Uygula")
         self.btn_style_default = QPushButton("Varsayılan")
         self.btn_style_reset_all = QPushButton("Tümünü Sıfırla")
         self.btn_style_reset_all.setProperty("danger", True)
+
+        self.shift_series_tree = QTreeWidget()
+        self.shift_series_tree.setHeaderLabels(["Kanal", "Stil Anahtarı"])
+        self.shift_series_tree.setColumnCount(2)
+        self.shift_series_tree.setRootIsDecorated(False)
+        self.shift_series_tree.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.shift_series_tree.setMaximumHeight(120)
+
+        self.btn_shift_apply = QPushButton("Shift Uygula")
+        self.btn_shift_reset = QPushButton("Shift Sıfırla")
+        self.btn_shift_check_all = QPushButton("Tümünü Seç")
+        self.btn_shift_uncheck_all = QPushButton("Tümünü Kaldır")
 
         sg.addWidget(self.chk_smooth, 0, 0, 1, 2)
         sg.addWidget(self.chk_cursor_marker, 0, 4, 1, 2)
@@ -2997,10 +3022,20 @@ class MainWindow(QMainWindow):
         sg.addWidget(QLabel("Kalınlık:"), 1, 4)
         sg.addWidget(self.sp_line_width, 1, 5)
         sg.addWidget(QLabel("X Kaydırma:"), 2, 0)
-        sg.addWidget(self.sp_x_shift, 2, 1, 1, 2)
-        sg.addWidget(self.btn_style_apply, 2, 3)
-        sg.addWidget(self.btn_style_default, 2, 4)
-        sg.addWidget(self.btn_style_reset_all, 2, 5)
+        sg.addWidget(self.sp_x_shift, 2, 1)
+        sg.addWidget(QLabel("Y Kaydırma:"), 2, 2)
+        sg.addWidget(self.sp_y_shift, 2, 3)
+        sg.addWidget(self.btn_style_apply, 2, 4)
+        sg.addWidget(self.btn_style_default, 2, 5)
+        sg.addWidget(self.btn_style_reset_all, 3, 0, 1, 2)
+        sg.addWidget(self.shift_series_tree, 4, 0, 1, 6)
+        shift_btn_row = QHBoxLayout()
+        shift_btn_row.addWidget(self.btn_shift_check_all)
+        shift_btn_row.addWidget(self.btn_shift_uncheck_all)
+        shift_btn_row.addWidget(self.btn_shift_apply)
+        shift_btn_row.addWidget(self.btn_shift_reset)
+        shift_btn_row.addStretch()
+        sg.addLayout(shift_btn_row, 5, 0, 1, 6)
         self.ctrl_tabs.addTab(tab_style, "Stil")
 
         plot_vsplit = QSplitter(Qt.Orientation.Vertical)
@@ -3167,6 +3202,11 @@ class MainWindow(QMainWindow):
         self.btn_style_apply.clicked.connect(self.apply_style_for_selected_series)
         self.btn_style_default.clicked.connect(self.reset_style_for_selected_series)
         self.btn_style_reset_all.clicked.connect(self.reset_all_styles)
+
+        self.btn_shift_apply.clicked.connect(self.apply_shift_for_checked_series)
+        self.btn_shift_reset.clicked.connect(self.reset_shift_for_checked_series)
+        self.btn_shift_check_all.clicked.connect(lambda: self._set_all_shift_checks(True))
+        self.btn_shift_uncheck_all.clicked.connect(lambda: self._set_all_shift_checks(False))
 
         self.btn_bg_pick.clicked.connect(self.pick_background_color)
         self.btn_bg_reset.clicked.connect(self.reset_background_color)
@@ -3441,6 +3481,7 @@ class MainWindow(QMainWindow):
             self._set_color_button_preview(None)
             self.sp_line_width.setValue(2.0)
             self.sp_x_shift.setValue(0.0)
+            self.sp_y_shift.setValue(0.0)
             return
         st = self.style_map.get(skey, {})
         col = st.get("color")
@@ -3452,6 +3493,10 @@ class MainWindow(QMainWindow):
             self.sp_x_shift.setValue(float(st.get("x_shift", 0.0) or 0.0))
         except Exception:
             self.sp_x_shift.setValue(0.0)
+        try:
+            self.sp_y_shift.setValue(float(st.get("y_shift", 0.0) or 0.0))
+        except Exception:
+            self.sp_y_shift.setValue(0.0)
 
     def pick_color_for_selected_series(self) -> None:
         skey = self._current_style_key()
@@ -3466,6 +3511,7 @@ class MainWindow(QMainWindow):
         st["color"] = qcolor_to_tuple(c)
         st.setdefault("width", self.sp_line_width.value())
         st["x_shift"] = float(self.sp_x_shift.value())
+        st["y_shift"] = float(self.sp_y_shift.value())
         self.style_map[skey] = st
         self._set_color_button_preview(st["color"])
         self.update_plot_data_with_filter()
@@ -3477,6 +3523,7 @@ class MainWindow(QMainWindow):
         st = self.style_map.get(skey, {})
         st["width"] = float(self.sp_line_width.value())
         st["x_shift"] = float(self.sp_x_shift.value())
+        st["y_shift"] = float(self.sp_y_shift.value())
         self.style_map[skey] = st
         self.update_plot_data_with_filter()
 
@@ -3488,12 +3535,81 @@ class MainWindow(QMainWindow):
         self._set_color_button_preview(None)
         self.sp_line_width.setValue(2.0)
         self.sp_x_shift.setValue(0.0)
+        self.sp_y_shift.setValue(0.0)
         self.update_plot_data_with_filter()
 
     def reset_all_styles(self) -> None:
         self.style_map.clear()
         self._on_style_series_changed()
         self.update_plot_data_with_filter()
+
+    # ----- Shift series tree -----
+
+    def _checked_shift_style_keys(self) -> List[str]:
+        """Return style keys for all checked items in the shift series tree."""
+        keys: List[str] = []
+        for i in range(self.shift_series_tree.topLevelItemCount()):
+            item = self.shift_series_tree.topLevelItem(i)
+            if item is not None and item.checkState(0) == Qt.CheckState.Checked:
+                skey = item.data(0, Qt.ItemDataRole.UserRole)
+                if skey:
+                    keys.append(skey)
+        return keys
+
+    def _set_all_shift_checks(self, checked: bool) -> None:
+        state = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
+        for i in range(self.shift_series_tree.topLevelItemCount()):
+            item = self.shift_series_tree.topLevelItem(i)
+            if item is not None:
+                item.setCheckState(0, state)
+
+    def apply_shift_for_checked_series(self) -> None:
+        """Apply the current X/Y shift values to all checked channels in the shift tree."""
+        keys = self._checked_shift_style_keys()
+        if not keys:
+            return
+        xs = float(self.sp_x_shift.value())
+        ys = float(self.sp_y_shift.value())
+        for skey in keys:
+            st = self.style_map.get(skey, {})
+            st["x_shift"] = xs
+            st["y_shift"] = ys
+            self.style_map[skey] = st
+        self.update_plot_data_with_filter()
+
+    def reset_shift_for_checked_series(self) -> None:
+        """Reset X/Y shift to zero for all checked channels in the shift tree."""
+        keys = self._checked_shift_style_keys()
+        if not keys:
+            return
+        for skey in keys:
+            st = self.style_map.get(skey, {})
+            st["x_shift"] = 0.0
+            st["y_shift"] = 0.0
+            self.style_map[skey] = st
+        self.sp_x_shift.setValue(0.0)
+        self.sp_y_shift.setValue(0.0)
+        self.update_plot_data_with_filter()
+
+    def _populate_shift_series_tree(self) -> None:
+        """Populate the shift series tree with current plotted channels."""
+        self.shift_series_tree.clear()
+        if not self.current_series:
+            return
+        seen: set = set()
+        for s in self.current_series:
+            skey = s.get("style_key")
+            if not skey or skey in seen:
+                continue
+            seen.add(skey)
+            fl = (s.get("file_label") or "").strip()
+            nm = (s.get("name") or "").strip()
+            label = f"{fl} | {nm}" if fl else nm
+            item = QTreeWidgetItem([label, skey])
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(0, Qt.CheckState.Unchecked)
+            item.setData(0, Qt.ItemDataRole.UserRole, skey)
+            self.shift_series_tree.addTopLevelItem(item)
 
     # ----- Persistence -----
 
@@ -3960,6 +4076,7 @@ class MainWindow(QMainWindow):
         self.cmb_fft_channel.clear()
         self.cmb_style_series.clear()
         if not self.current_series:
+            self._populate_shift_series_tree()
             return
         seen: set = set()
         for s in self.current_series:
@@ -3973,6 +4090,7 @@ class MainWindow(QMainWindow):
             self.cmb_fft_channel.addItem(label, userData=skey)
             self.cmb_style_series.addItem(label, userData=skey)
         self._on_style_series_changed()
+        self._populate_shift_series_tree()
 
     def _capture_current_ranges(self) -> None:
         self._preserve_main_xrange = None
@@ -4067,6 +4185,7 @@ class MainWindow(QMainWindow):
         self.current_series = None
         self.cmb_fft_channel.clear()
         self.cmb_style_series.clear()
+        self.shift_series_tree.clear()
         self.clear_markers()
         self._refresh_statistics()
 
