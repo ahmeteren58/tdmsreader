@@ -499,39 +499,88 @@ def _format_x_for_display(axis_mode: str, x: float) -> str:
     return f"{x:.12g}"
 
 
-def is_digital_like(y: np.ndarray) -> bool:
-    if y is None:
-        return False
-    y = np.asarray(y)
+def compute_channel_stats(x: np.ndarray, y: np.ndarray,
+                          x0: Optional[float] = None, x1: Optional[float] = None) -> Optional[dict]:
+    """Bir kanal için temel istatistikleri hesaplar.
+
+    İsteğe bağlı [x0, x1] aralığı verilirse sadece o pencere kullanılır.
+    NaN/Inf değerler göz ardı edilir. Yeterli geçerli örnek yoksa None döner.
+    """
+    y = np.asarray(y, dtype=np.float64)
     if y.size == 0:
-        return False
-    max_n = 50000
-    stride = max(1, int(y.size // max_n))
-    yy = y[::stride]
-    if np.issubdtype(yy.dtype, np.floating):
-        yy = yy[np.isfinite(yy)]
-        if yy.size == 0:
-            return False
-    min_val, max_val = np.min(yy), np.max(yy)
-    if min_val == max_val:
-        return False
-    uniq = np.unique(yy)
-    if uniq.size > 8:
-        return False
-    uf = uniq.astype(np.float64, copy=False)
-    if np.all(np.abs(uf - np.round(uf)) < 1e-6):
-        lo = float(uf.min())
-        hi = float(uf.max())
-        if (hi - lo) <= 10.0:
-            return True
-    if uniq.size <= 3:
-        lo = float(np.min(uf))
-        hi = float(np.max(uf))
-        if hi > lo:
-            zz = (uf - lo) / (hi - lo)
-            if np.all(np.abs(zz - np.round(zz)) < 1e-6):
-                return True
-    return False
+        return None
+
+    if x0 is not None and x1 is not None and x is not None:
+        xx = np.asarray(x, dtype=np.float64)
+        if xx.size == y.size:
+            lo, hi = (x0, x1) if x0 <= x1 else (x1, x0)
+            sel = (xx >= lo) & (xx <= hi)
+            if np.any(sel):
+                y = y[sel]
+
+    y = y[np.isfinite(y)]
+    if y.size == 0:
+        return None
+
+    mean = float(np.mean(y))
+    return {
+        "count": int(y.size),
+        "min": float(np.min(y)),
+        "max": float(np.max(y)),
+        "mean": mean,
+        "std": float(np.std(y)),
+        "rms": float(np.sqrt(np.mean(np.square(y)))),
+        "p2p": float(np.max(y) - np.min(y)),
+        "median": float(np.median(y)),
+    }
+
+
+def named_series_to_csv(named: List[Tuple[str, np.ndarray, np.ndarray]],
+                        x_label: str = "x", delimiter: str = ",") -> str:
+    """(name, x, y) üçlülerinden CSV metni üretir.
+
+    Tüm kanallar aynı X eksenini paylaşıyorsa "wide" (geniş) biçim kullanılır:
+        x, ch1, ch2, ...
+    Aksi halde "long" (uzun) biçim kullanılır:
+        channel, x, y
+    """
+    cleaned: List[Tuple[str, np.ndarray, np.ndarray]] = []
+    for name, x, y in named:
+        xa = np.asarray(x, dtype=np.float64).ravel()
+        ya = np.asarray(y, dtype=np.float64).ravel()
+        n = min(xa.size, ya.size)
+        if n <= 0:
+            continue
+        cleaned.append((str(name), xa[:n], ya[:n]))
+
+    if not cleaned:
+        return ""
+
+    def _fmt(v: float) -> str:
+        return f"{v:.12g}"
+
+    # Tüm kanalların X'i aynı mı? (geniş biçim için)
+    x0 = cleaned[0][1]
+    shareable = all(
+        (xx.size == x0.size and np.allclose(xx, x0, rtol=1e-9, atol=0.0, equal_nan=True))
+        for (_n, xx, _y) in cleaned
+    )
+
+    lines: List[str] = []
+    if shareable:
+        header = [x_label] + [name for (name, _x, _y) in cleaned]
+        lines.append(delimiter.join(header))
+        cols = [y for (_n, _x, y) in cleaned]
+        for i in range(x0.size):
+            row = [_fmt(float(x0[i]))] + [_fmt(float(c[i])) for c in cols]
+            lines.append(delimiter.join(row))
+    else:
+        lines.append(delimiter.join(["channel", x_label, "y"]))
+        for name, xx, yy in cleaned:
+            for i in range(xx.size):
+                lines.append(delimiter.join([name, _fmt(float(xx[i])), _fmt(float(yy[i]))]))
+
+    return "\n".join(lines) + "\n"
 
 
 def detect_digital_like(y: np.ndarray) -> Tuple[bool, Optional[Tuple[float, float]]]:
@@ -1166,13 +1215,19 @@ class FFTWorker(QObject):
                 raise ValueError("Örnekleme hızı (Fs) bilinmiyor. (Fs girin ya da zaman eksenli kanal seçin)")
 
             window_name = "Yok"
-            coherent_gain = 1.0
             if self.use_window:
                 win = np.hanning(y.size)
-                coherent_gain = float(np.mean(win)) if win.size else 1.0
-                coherent_gain = coherent_gain if coherent_gain > 0 else 1.0
-                y = y * win
                 window_name = "Hanning"
+            else:
+                win = np.ones(y.size, dtype=np.float64)
+
+            # Coherent gain (amplitude) ve power normalizasyonu (PSD) için pencere katsayıları
+            coherent_gain = float(np.mean(win)) if win.size else 1.0
+            coherent_gain = coherent_gain if coherent_gain > 0 else 1.0
+            power_norm = float(np.mean(np.square(win))) if win.size else 1.0
+            power_norm = power_norm if power_norm > 0 else 1.0
+
+            y = y * win
 
             y = np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
             if self._is_cancelled():
@@ -1180,19 +1235,28 @@ class FFTWorker(QObject):
                 return
 
             Y = np.fft.rfft(y)
-            freq = np.fft.rfftfreq(y.size, d=1.0 / fs)
-            mag = np.abs(Y) / max(1, y.size)
-            mag = mag / max(coherent_gain, 1e-12)
+            n = int(y.size)
+            freq = np.fft.rfftfreq(n, d=1.0 / fs)
+
+            # Tek taraflı genlik spektrumu (amplitude)
+            mag = np.abs(Y) / max(1, n)
+            mag = mag / coherent_gain
             if mag.size > 2:
                 mag[1:-1] *= 2.0
+
+            # Tek taraflı güç spektral yoğunluğu (PSD), birim: <y-birimi>^2/Hz
+            psd = (np.abs(Y) ** 2) / (fs * n * power_norm)
+            if psd.size > 2:
+                psd[1:-1] *= 2.0
 
             self.finished.emit({
                 "name": self.name,
                 "freq": freq.astype(np.float64),
                 "mag_linear": mag.astype(np.float64),
+                "psd_linear": psd.astype(np.float64),
                 "fs": float(fs),
-                "n": int(y.size),
-                "df": float(fs / y.size),
+                "n": n,
+                "df": float(fs / n),
                 "window_name": window_name,
                 "remove_mean": bool(self.remove_mean),
                 "detrend_linear": bool(self.detrend_linear),
@@ -2958,6 +3022,7 @@ class MainWindow(QMainWindow):
         self.plot_pane = PlotPane(bg_rgb=self.plot_bg_rgb)
 
         controls = QFrame()
+        self.controls_panel = controls
 
         controls.setObjectName("controlsDock")
 
@@ -3044,6 +3109,14 @@ class MainWindow(QMainWindow):
         self.btn_detach = QPushButton("Grafiği Ayır")
         self._set_bg_button_preview(self.plot_bg_rgb)
 
+        # Export / analysis actions
+        self.btn_export_csv = QPushButton("Veriyi CSV")
+        self.btn_export_csv.setToolTip("Çizilen kanalları (aralık seçiliyse o aralığı) CSV olarak kaydet (Ctrl+E)")
+        self.btn_export_png = QPushButton("Grafik PNG")
+        self.btn_export_png.setToolTip("Grafiği PNG görüntü olarak kaydet")
+        self.btn_stats = QPushButton("İstatistik")
+        self.btn_stats.setToolTip("Çizilen kanallar için istatistikleri göster (Ctrl+I)")
+
         rg.addWidget(self.chk_region, 0, 0)
         rg.addWidget(QLabel("Min:"), 0, 1)
         rg.addWidget(self.xmin, 0, 2)
@@ -3054,6 +3127,10 @@ class MainWindow(QMainWindow):
         rg.addWidget(self.btn_bg_pick, 1, 0, 1, 2)
         rg.addWidget(self.btn_bg_reset, 1, 2, 1, 2)
         rg.addWidget(self.btn_detach, 1, 4, 1, 2)
+
+        rg.addWidget(self.btn_export_csv, 2, 0, 1, 2)
+        rg.addWidget(self.btn_export_png, 2, 2, 1, 2)
+        rg.addWidget(self.btn_stats, 2, 4, 1, 2)
 
         self.ctrl_tabs.addTab(tab_range, "Aralık")
 
@@ -3272,12 +3349,16 @@ class MainWindow(QMainWindow):
         self.btn_fft_clear = QPushButton("FFT Temizle")
         self.btn_fft_clear.setToolTip("FFT grafiğini ve özet bilgisini temizler")
 
+        self.btn_fft_export = QPushButton("FFT CSV")
+        self.btn_fft_export.setToolTip("Hesaplanan spektrumu (frekans, genlik, PSD) CSV olarak dışa aktar")
+
         fft_row1.addWidget(QLabel("Kanal:"), 0, 0)
         fft_row1.addWidget(self.cmb_fft_channel, 0, 1)
         fft_row1.addWidget(QLabel("Fs (0=auto):"), 0, 2)
         fft_row1.addWidget(self.fs_fft, 0, 3)
         fft_row1.addWidget(self.btn_fft, 0, 4)
         fft_row1.addWidget(self.btn_fft_clear, 0, 5)
+        fft_row1.addWidget(self.btn_fft_export, 0, 6)
         fft_row1.setColumnStretch(1, 1)
         fft_panel_l.addLayout(fft_row1)
 
@@ -3302,7 +3383,11 @@ class MainWindow(QMainWindow):
         self.chk_fft_peak.setChecked(True)
         self.chk_fft_peak.setToolTip("Filtrelenmiş spektrum üzerindeki en baskın frekansı işaretler")
 
-        for w in (self.chk_fft_log, self.chk_fft_window, self.chk_fft_remove_mean,
+        self.chk_fft_psd = QCheckBox("PSD (güç yoğunluğu)")
+        self.chk_fft_psd.setChecked(False)
+        self.chk_fft_psd.setToolTip("Genlik yerine tek taraflı güç spektral yoğunluğu (birim²/Hz) göster")
+
+        for w in (self.chk_fft_log, self.chk_fft_psd, self.chk_fft_window, self.chk_fft_remove_mean,
                   self.chk_fft_detrend, self.chk_fft_hide_dc, self.chk_fft_peak):
             fft_row2.addWidget(w)
         fft_row2.addStretch(1)
@@ -3340,6 +3425,92 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 4)
         splitter.setSizes([320, 1240])
+
+        self._build_menubar()
+
+    def _build_menubar(self):
+        mb = self.menuBar()
+        mb.clear()
+
+        # Dosya
+        m_file = mb.addMenu("Dosya")
+        act_open = QAction("TDMS Aç...", self)
+        act_open.triggered.connect(self.open_tdms)
+        m_file.addAction(act_open)
+
+        self.menu_recent = m_file.addMenu("Son Dosyalar")
+        self._rebuild_recent_menu()
+
+        m_file.addSeparator()
+        act_quit = QAction("Çıkış", self)
+        act_quit.triggered.connect(self.close)
+        m_file.addAction(act_quit)
+
+        # Dışa Aktar
+        m_export = mb.addMenu("Dışa Aktar")
+        act_csv = QAction("Çizilen Veriyi CSV...", self)
+        act_csv.setShortcut("Ctrl+E")
+        act_csv.triggered.connect(self.export_plotted_csv)
+        m_export.addAction(act_csv)
+
+        act_png = QAction("Grafik Görüntüsü (PNG)...", self)
+        act_png.triggered.connect(self.export_plot_image)
+        m_export.addAction(act_png)
+
+        act_fft_csv = QAction("FFT CSV...", self)
+        act_fft_csv.triggered.connect(self.export_fft_csv)
+        m_export.addAction(act_fft_csv)
+
+        # Analiz
+        m_analyze = mb.addMenu("Analiz")
+        act_stats = QAction("İstatistikler (Çizilen Kanallar)...", self)
+        act_stats.setShortcut("Ctrl+I")
+        act_stats.triggered.connect(self.show_statistics)
+        m_analyze.addAction(act_stats)
+
+    def _recent_files(self) -> List[str]:
+        try:
+            val = self.settings.value("paths/recent_files", [])
+            if isinstance(val, str):
+                val = [val] if val else []
+            return [str(p) for p in (val or []) if p]
+        except Exception:
+            return []
+
+    def _add_recent_file(self, path: str):
+        try:
+            path = os.path.abspath(path)
+            recent = [p for p in self._recent_files() if os.path.abspath(p) != path]
+            recent.insert(0, path)
+            recent = recent[:10]
+            self.settings.setValue("paths/recent_files", recent)
+            self._rebuild_recent_menu()
+        except Exception as e:
+            logger.debug("Recent file kaydı başarısız: %s", e)
+
+    def _rebuild_recent_menu(self):
+        menu = getattr(self, "menu_recent", None)
+        if menu is None:
+            return
+        menu.clear()
+        recent = self._recent_files()
+        if not recent:
+            act = QAction("(boş)", self)
+            act.setEnabled(False)
+            menu.addAction(act)
+            return
+        for p in recent:
+            act = QAction(p, self)
+            act.triggered.connect(lambda _checked=False, path=p: self.open_tdms_path(path))
+            menu.addAction(act)
+        menu.addSeparator()
+        act_clear = QAction("Listeyi Temizle", self)
+        act_clear.triggered.connect(self._clear_recent_files)
+        menu.addAction(act_clear)
+
+    def _clear_recent_files(self):
+        self.settings.setValue("paths/recent_files", [])
+        self._rebuild_recent_menu()
 
     def _connect_signals(self):
         self.btn_open.clicked.connect(self.open_tdms)
@@ -3393,10 +3564,17 @@ class MainWindow(QMainWindow):
         self.btn_bg_reset.clicked.connect(self.reset_background_color)
         self.btn_detach.clicked.connect(self.toggle_detach_plot)
 
+        # Export / analysis
+        self.btn_export_csv.clicked.connect(self.export_plotted_csv)
+        self.btn_export_png.clicked.connect(self.export_plot_image)
+        self.btn_stats.clicked.connect(self.show_statistics)
+
         # FFT
         self.btn_fft.clicked.connect(self.compute_fft)
         self.btn_fft_clear.clicked.connect(self.clear_fft_plot)
+        self.btn_fft_export.clicked.connect(self.export_fft_csv)
         self.chk_fft_log.toggled.connect(self._rerender_fft_plot)
+        self.chk_fft_psd.toggled.connect(self._rerender_fft_plot)
         self.chk_fft_hide_dc.toggled.connect(self._rerender_fft_plot)
         self.chk_fft_peak.toggled.connect(self._rerender_fft_plot)
         self.sp_fft_fmin.valueChanged.connect(self._rerender_fft_plot)
@@ -3900,6 +4078,8 @@ class MainWindow(QMainWindow):
                 self.chk_fft_hide_dc.setChecked(str(self.settings.value("fft/hide_dc", "true")).lower() in ("1", "true", "yes"))
             if hasattr(self, "chk_fft_peak"):
                 self.chk_fft_peak.setChecked(str(self.settings.value("fft/peak", "true")).lower() in ("1", "true", "yes"))
+            if hasattr(self, "chk_fft_psd"):
+                self.chk_fft_psd.setChecked(str(self.settings.value("fft/psd", "false")).lower() in ("1", "true", "yes"))
             if hasattr(self, "sp_fft_fmin"):
                 try:
                     self.sp_fft_fmin.setValue(float(self.settings.value("fft/fmin", 0.0) or 0.0))
@@ -3947,6 +4127,8 @@ class MainWindow(QMainWindow):
                 self.settings.setValue("fft/hide_dc", bool(self.chk_fft_hide_dc.isChecked()))
             if hasattr(self, "chk_fft_peak"):
                 self.settings.setValue("fft/peak", bool(self.chk_fft_peak.isChecked()))
+            if hasattr(self, "chk_fft_psd"):
+                self.settings.setValue("fft/psd", bool(self.chk_fft_psd.isChecked()))
             if hasattr(self, "sp_fft_fmin"):
                 self.settings.setValue("fft/fmin", float(self.sp_fft_fmin.value()))
             if hasattr(self, "sp_fft_fmax"):
@@ -4030,6 +4212,9 @@ class MainWindow(QMainWindow):
             self.settings.setValue("paths/last_dir", os.path.dirname(path))
         except Exception:
             pass
+
+        if os.path.isfile(path):
+            self._add_recent_file(path)
 
         for fid, st in self.files.items():
             if os.path.abspath(st.path) == os.path.abspath(path):
@@ -4716,6 +4901,148 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
+    # ---------------- Export & Statistics ----------------
+    def _gather_plotted_xy(self, full_res: bool = True) -> List[Tuple[str, np.ndarray, np.ndarray]]:
+        """Çizili kanalların (isim, x, y) listesini döndürür; X/Y shift uygulanır.
+
+        full_res=True ise lazy kanallar için tüm veri diskten okunur.
+        """
+        out: List[Tuple[str, np.ndarray, np.ndarray]] = []
+        for s in (self.current_series or []):
+            skey = s.get("style_key") or ""
+            if full_res:
+                x, y = self._load_full_xy_for_series(s)
+            else:
+                x = np.asarray(s.get("x", []), dtype=np.float64)
+                y = np.asarray(s.get("y", []), dtype=np.float64)
+
+            st = self.style_map.get(skey, {}) if skey else {}
+            x_shift = float(st.get("x_shift", 0.0) or 0.0)
+            y_shift = float(st.get("y_shift", 0.0) or 0.0)
+            if math.isfinite(x_shift) and x_shift != 0.0:
+                x = np.asarray(x, dtype=np.float64) + x_shift
+            if math.isfinite(y_shift) and y_shift != 0.0:
+                y = np.asarray(y, dtype=np.float64) + y_shift
+
+            fl = (s.get("file_label") or "").strip()
+            nm = (s.get("name") or "").strip()
+            name = f"{fl} | {nm}" if fl else nm
+            out.append((name, np.asarray(x, dtype=np.float64), np.asarray(y, dtype=np.float64)))
+        return out
+
+    def _active_region_xrange(self) -> Optional[Tuple[float, float]]:
+        try:
+            if getattr(self.plot_pane, "_region_enabled", False):
+                v = self.plot_pane.region_values()
+                if v and math.isfinite(v[0]) and math.isfinite(v[1]) and v[1] > v[0]:
+                    return float(v[0]), float(v[1])
+        except Exception:
+            pass
+        return None
+
+    def export_plotted_csv(self):
+        if not self.current_series:
+            QMessageBox.information(self, "Veri Yok", "Önce kanalları çizdirin.")
+            return
+
+        last_dir = str(self.settings.value("paths/last_export_dir", "") or "")
+        start = os.path.join(last_dir, "veri.csv") if last_dir else "veri.csv"
+        path, _ = QFileDialog.getSaveFileName(self, "Veriyi CSV Kaydet", start, "CSV (*.csv)")
+        if not path:
+            return
+
+        region = self._active_region_xrange()
+        try:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            named = self._gather_plotted_xy(full_res=True)
+            if region is not None:
+                lo, hi = region
+                clipped = []
+                for name, x, y in named:
+                    sel = (x >= lo) & (x <= hi)
+                    if np.any(sel):
+                        clipped.append((name, x[sel], y[sel]))
+                named = clipped or named
+
+            axis_mode, x_label = _axis_mode_and_label_from_series(self.current_series)
+            csv_text = named_series_to_csv(named, x_label=x_label or "x")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(csv_text)
+            self.settings.setValue("paths/last_export_dir", os.path.dirname(path))
+            scope = "aralık" if region is not None else "tüm veri"
+            self.status.showMessage(f"CSV kaydedildi ({scope}): {os.path.basename(path)}", 4000)
+        except Exception as e:
+            QMessageBox.critical(self, "Dışa Aktarma Hatası", f"CSV yazılamadı:\n{e}")
+        finally:
+            QApplication.restoreOverrideCursor()
+
+    def export_plot_image(self):
+        if self.plot_pane.plot is None:
+            QMessageBox.information(self, "Grafik Yok", "Önce kanalları çizdirin.")
+            return
+
+        last_dir = str(self.settings.value("paths/last_export_dir", "") or "")
+        start = os.path.join(last_dir, "grafik.png") if last_dir else "grafik.png"
+        path, _ = QFileDialog.getSaveFileName(self, "Grafik Görüntüsü Kaydet", start, "PNG (*.png)")
+        if not path:
+            return
+
+        try:
+            from pyqtgraph.exporters import ImageExporter
+            exporter = ImageExporter(self.plot_pane.plot.getPlotItem())
+            exporter.export(path)
+            self.settings.setValue("paths/last_export_dir", os.path.dirname(path))
+            self.status.showMessage(f"Grafik kaydedildi: {os.path.basename(path)}", 4000)
+        except Exception as e:
+            QMessageBox.critical(self, "Dışa Aktarma Hatası", f"Görüntü yazılamadı:\n{e}")
+
+    def show_statistics(self):
+        if not self.current_series:
+            QMessageBox.information(self, "Veri Yok", "Önce kanalları çizdirin.")
+            return
+
+        region = self._active_region_xrange()
+        try:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            named = self._gather_plotted_xy(full_res=True)
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        rows = []
+        for name, x, y in named:
+            if region is not None:
+                stats = compute_channel_stats(x, y, region[0], region[1])
+            else:
+                stats = compute_channel_stats(x, y)
+            if stats is None:
+                continue
+            rows.append((name, stats))
+
+        if not rows:
+            QMessageBox.information(self, "İstatistik", "İstatistik hesaplanacak geçerli veri yok.")
+            return
+
+        scope = f"Aralık [{region[0]:.6g}, {region[1]:.6g}]" if region is not None else "Tüm veri"
+        header = f"{'Kanal':<28} {'N':>9} {'Min':>13} {'Max':>13} {'Ort':>13} {'Std':>13} {'RMS':>13} {'P2P':>13}"
+        lines = [scope, "", header, "-" * len(header)]
+        for name, st in rows:
+            nm = (name[:27]) if len(name) > 27 else name
+            lines.append(
+                f"{nm:<28} {st['count']:>9d} {st['min']:>13.6g} {st['max']:>13.6g} "
+                f"{st['mean']:>13.6g} {st['std']:>13.6g} {st['rms']:>13.6g} {st['p2p']:>13.6g}"
+            )
+
+        dlg = QMessageBox(self)
+        dlg.setWindowTitle("İstatistikler")
+        dlg.setIcon(QMessageBox.Icon.Information)
+        dlg.setText("Çizilen kanal istatistikleri:")
+        dlg.setDetailedText("\n".join(lines))
+        try:
+            dlg.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        except Exception:
+            pass
+        dlg.exec()
+
     # ---------------- Markers ----------------
     def clear_markers(self):
         self.plot_pane.clear_markers()
@@ -4848,7 +5175,13 @@ class MainWindow(QMainWindow):
             return
 
         freq = np.asarray(p.get("freq", []), dtype=np.float64)
-        mag_linear = np.asarray(p.get("mag_linear", []), dtype=np.float64)
+        use_psd = bool(self.chk_fft_psd.isChecked()) if hasattr(self, "chk_fft_psd") else False
+        if use_psd and p.get("psd_linear") is not None:
+            mag_linear = np.asarray(p.get("psd_linear", []), dtype=np.float64)
+            mag_kind = "psd"
+        else:
+            mag_linear = np.asarray(p.get("mag_linear", []), dtype=np.float64)
+            mag_kind = "amp"
         if freq.size == 0 or mag_linear.size == 0:
             self.clear_fft_plot()
             return
@@ -4884,12 +5217,20 @@ class MainWindow(QMainWindow):
             )
             return
 
-        if use_log:
-            mag_plot = 20.0 * np.log10(np.maximum(mag_linear_p, 1e-20))
-            ylab = "Genlik (dB)"
+        if mag_kind == "psd":
+            if use_log:
+                mag_plot = 10.0 * np.log10(np.maximum(mag_linear_p, 1e-20))
+                ylab = "PSD (dB/Hz)"
+            else:
+                mag_plot = mag_linear_p
+                ylab = "PSD (birim²/Hz)"
         else:
-            mag_plot = mag_linear_p
-            ylab = "Genlik"
+            if use_log:
+                mag_plot = 20.0 * np.log10(np.maximum(mag_linear_p, 1e-20))
+                ylab = "Genlik (dB)"
+            else:
+                mag_plot = mag_linear_p
+                ylab = "Genlik"
 
         curve = self.fft_plot.plot(freq_p, mag_plot, pen=self._fft_curve_pen())
         try:
@@ -4944,7 +5285,8 @@ class MainWindow(QMainWindow):
                     brush=self._fft_peak_brush(),
                 )
                 self.fft_plot.addItem(scatter)
-                peak_text = f"Baskın pik: {peak_freq:.6g} Hz | Genlik: {peak_mag_linear:.6g}"
+                peak_kind_lbl = "PSD" if mag_kind == "psd" else "Genlik"
+                peak_text = f"Baskın pik: {peak_freq:.6g} Hz | {peak_kind_lbl}: {peak_mag_linear:.6g}"
             except Exception:
                 peak_text = "Baskın pik hesaplanamadı"
 
@@ -5015,6 +5357,41 @@ class MainWindow(QMainWindow):
         self._last_fft_payload = p or None
         self._render_fft_payload(p)
         self.tabs.setCurrentIndex(1)
+
+    def export_fft_csv(self):
+        p = getattr(self, "_last_fft_payload", None)
+        if not p:
+            QMessageBox.information(self, "FFT Yok", "Önce bir FFT hesaplayın.")
+            return
+
+        freq = np.asarray(p.get("freq", []), dtype=np.float64)
+        mag = np.asarray(p.get("mag_linear", []), dtype=np.float64)
+        psd = np.asarray(p.get("psd_linear", []), dtype=np.float64)
+        if freq.size == 0 or mag.size == 0:
+            QMessageBox.information(self, "FFT Yok", "Dışa aktarılacak spektrum verisi yok.")
+            return
+
+        last_dir = str(self.settings.value("paths/last_export_dir", "") or "")
+        start = os.path.join(last_dir, "fft.csv") if last_dir else "fft.csv"
+        path, _ = QFileDialog.getSaveFileName(self, "FFT CSV Kaydet", start, "CSV (*.csv)")
+        if not path:
+            return
+
+        try:
+            n = freq.size
+            has_psd = psd.size == n
+            lines = ["frequency_hz,amplitude" + (",psd" if has_psd else "")]
+            for i in range(n):
+                if has_psd:
+                    lines.append(f"{freq[i]:.12g},{mag[i]:.12g},{psd[i]:.12g}")
+                else:
+                    lines.append(f"{freq[i]:.12g},{mag[i]:.12g}")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+            self.settings.setValue("paths/last_export_dir", os.path.dirname(path))
+            self.status.showMessage(f"FFT CSV kaydedildi: {os.path.basename(path)}", 4000)
+        except Exception as e:
+            QMessageBox.critical(self, "Dışa Aktarma Hatası", f"FFT CSV yazılamadı:\n{e}")
 
     # ---------------- Drag & Drop ----------------
     def dragEnterEvent(self, e):
