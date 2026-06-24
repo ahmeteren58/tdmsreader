@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Veri Yükle · Vana CFD Kataloğu</title>
+  <link rel="stylesheet" href="assets/app.css" />
+  <style>
+    .wrap { max-width: 920px; margin: 0 auto; padding: 28px 22px 80px; }
+    .step { background: linear-gradient(180deg, var(--panel), var(--panel-2)); border: 1px solid var(--border); border-radius: 14px; padding: 22px; margin-bottom: 18px; }
+    .step h2 { font-size: 17px; margin-bottom: 10px; }
+    .step p { color: var(--muted); font-size: 14px; line-height: 1.6; }
+    .drop { border: 2px dashed var(--border); border-radius: 12px; padding: 40px; text-align: center; color: var(--muted); cursor: pointer; transition: all .15s; }
+    .drop:hover, .drop.over { border-color: var(--primary); color: var(--text); background: rgba(45,212,191,.05); }
+    code { background: var(--bg-2); padding: 2px 6px; border-radius: 6px; color: var(--primary); font-size: 13px; }
+    pre { background: #020617; border: 1px solid var(--border); border-radius: 10px; padding: 14px; overflow-x: auto; font-size: 12px; max-height: 320px; color: #cbd5e1; }
+    .cols { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap: 8px; margin-top: 12px; }
+    .col-item { background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; }
+    .col-item b { color: var(--primary); }
+    .col-item.req b::after { content: " *"; color: var(--danger); }
+    .status { margin-top: 12px; font-size: 14px; }
+    .status.ok { color: var(--ok); }
+    .status.err { color: var(--danger); }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">CFD</div>
+      <div><h1>Veri Yükle</h1><p class="subtitle">Excel/CSV → data.js (offline)</p></div>
+    </div>
+    <a class="btn btn-ghost" href="index.html">← Kataloğa Dön</a>
+  </header>
+
+  <div class="wrap">
+    <div class="step">
+      <h2>1) Şablonu indir</h2>
+      <p>Aşağıdaki butonla boş şablonu indir, her vana CFD analizi için bir satır doldur. Görseller için
+      <code>images/</code> klasörüne koyduğun dosyanın yolunu yaz (örn. <code>images/btf_dn100_pressure.png</code>).</p>
+      <div class="actions">
+        <button id="dl-template" class="btn btn-primary">CSV Şablonu İndir</button>
+      </div>
+      <div class="cols" id="cols"></div>
+      <p style="margin-top:10px"><span style="color:var(--danger)">*</span> ile işaretli alanlar zorunludur. Diğerleri boş bırakılabilir.</p>
+    </div>
+
+    <div class="step">
+      <h2>2) Doldurulmuş dosyayı yükle</h2>
+      <p>Excel (<code>.xlsx</code>) veya <code>.csv</code> dosyanı buraya sürükle ya da tıklayıp seç.</p>
+      <div class="drop" id="drop">Dosyayı buraya bırak veya tıkla<br /><small>.xlsx, .xls, .csv</small></div>
+      <input type="file" id="file" accept=".xlsx,.xls,.csv" hidden />
+      <div id="status" class="status"></div>
+    </div>
+
+    <div class="step">
+      <h2>3) data.js dosyasını indir ve yerine koy</h2>
+      <p>Önizlemeyi kontrol et, ardından <code>data.js</code>'i indir ve ortak klasördeki
+      <code>assets/data.js</code> dosyasının üzerine yaz. Tüm kullanıcılar güncel veriyi görür.</p>
+      <div class="actions">
+        <button id="dl-data" class="btn btn-accent" disabled>data.js İndir</button>
+      </div>
+      <pre id="preview" style="margin-top:14px">Henüz dosya yüklenmedi.</pre>
+    </div>
+  </div>
+
+  <script src="assets/vendor/xlsx.full.min.js"></script>
+  <script>
+    // Sütun tanımları: [anahtar, etiket, zorunlu, tip]
+    const COLUMNS = [
+      ["id", "id", true, "string"],
+      ["name", "name (Ad)", true, "string"],
+      ["type", "type (Tip)", true, "string"],
+      ["dn", "dn (Ölçü mm)", true, "number"],
+      ["pressureClass", "pressureClass", false, "string"],
+      ["opening", "opening (%)", false, "number"],
+      ["fluid", "fluid (Akışkan)", false, "string"],
+      ["temperature", "temperature (°C)", false, "number"],
+      ["inletPressure", "inletPressure (bar)", false, "number"],
+      ["outletPressure", "outletPressure (bar)", false, "number"],
+      ["flowRate", "flowRate (m³/h)", false, "number"],
+      ["reynolds", "reynolds", false, "number"],
+      ["cv", "cv", false, "number"],
+      ["kv", "kv", false, "number"],
+      ["deltaP", "deltaP (bar)", false, "number"],
+      ["kFactor", "kFactor (ζ)", false, "number"],
+      ["cavitationIndex", "cavitationIndex (σ)", false, "number"],
+      ["torque", "torque (Nm)", false, "number"],
+      ["massFlow", "massFlow (kg/s)", false, "number"],
+      ["image1", "image1 (yol)", false, "string"],
+      ["image1_label", "image1_label", false, "string"],
+      ["image2", "image2 (yol)", false, "string"],
+      ["image2_label", "image2_label", false, "string"],
+      ["image3", "image3 (yol)", false, "string"],
+      ["image3_label", "image3_label", false, "string"],
+      ["analysisDate", "analysisDate (YYYY-AA-GG)", false, "string"],
+      ["notes", "notes (Notlar)", false, "string"],
+    ];
+
+    // Sütun listesini ekrana bas
+    const colsEl = document.getElementById("cols");
+    COLUMNS.forEach(([key, label, req]) => {
+      const d = document.createElement("div");
+      d.className = "col-item" + (req ? " req" : "");
+      d.innerHTML = `<b>${key}</b><br><span style="color:var(--muted)">${label}</span>`;
+      colsEl.appendChild(d);
+    });
+
+    // Şablon indir
+    document.getElementById("dl-template").addEventListener("click", () => {
+      const header = COLUMNS.map((c) => c[0]).join(",");
+      const example =
+        "btf-dn100,Kelebek Vana DN100 - Tam Açık,Kelebek Vana,100,PN16,100,Su,20,6,5.82,320,1100000,1180,1021,0.18,0.35,2.9,145,88.9," +
+        "images/btf_dn100_pressure.png,Basınç Konturu,images/btf_dn100_velocity.png,Hız Konturu,images/btf_dn100_stream.png,Akım Çizgileri,2026-03-12,Tam açık konumda düşük kayıp.";
+      const csv = "\uFEFF" + header + "\n" + example + "\n";
+      downloadFile("vana_cfd_sablon.csv", csv, "text/csv");
+    });
+
+    let generatedJS = "";
+    const statusEl = document.getElementById("status");
+    const previewEl = document.getElementById("preview");
+    const dlDataBtn = document.getElementById("dl-data");
+
+    function num(v) {
+      if (v === undefined || v === null || v === "") return null;
+      if (typeof v === "number") return v;
+      const n = parseFloat(String(v).replace(",", "."));
+      return Number.isNaN(n) ? null : n;
+    }
+
+    function buildImages(row) {
+      const imgs = [];
+      [["image1", "image1_label"], ["image2", "image2_label"], ["image3", "image3_label"]].forEach(
+        ([src, lbl], i) => {
+          if (row[src]) imgs.push({ label: row[lbl] || "Görsel " + (i + 1), src: String(row[src]) });
+        }
+      );
+      return imgs;
+    }
+
+    function processRows(rows) {
+      const errors = [];
+      const out = [];
+      rows.forEach((row, idx) => {
+        const r = {};
+        Object.keys(row).forEach((k) => (r[String(k).trim()] = row[k]));
+        if (!r.id && !r.name) return; // boş satır
+        COLUMNS.forEach(([key, label, req]) => {
+          if (req && (r[key] === undefined || r[key] === "")) {
+            errors.push(`Satır ${idx + 2}: zorunlu alan eksik → ${key}`);
+          }
+        });
+        out.push({
+          id: String(r.id || "").trim(),
+          name: String(r.name || "").trim(),
+          type: String(r.type || "").trim(),
+          dn: num(r.dn),
+          pressureClass: r.pressureClass ? String(r.pressureClass) : "",
+          opening: num(r.opening) ?? 100,
+          fluid: r.fluid ? String(r.fluid) : "",
+          temperature: num(r.temperature),
+          inletPressure: num(r.inletPressure),
+          outletPressure: num(r.outletPressure),
+          flowRate: num(r.flowRate),
+          reynolds: num(r.reynolds),
+          results: {
+            cv: num(r.cv),
+            kv: num(r.kv),
+            deltaP: num(r.deltaP),
+            kFactor: num(r.kFactor),
+            cavitationIndex: num(r.cavitationIndex),
+            torque: num(r.torque),
+            massFlow: num(r.massFlow),
+          },
+          images: buildImages(r),
+          analysisDate: r.analysisDate ? String(r.analysisDate) : "",
+          notes: r.notes ? String(r.notes) : "",
+        });
+      });
+      return { out, errors };
+    }
+
+    function handleFile(file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const wb = XLSX.read(data, { type: "array" });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+          const { out, errors } = processRows(rows);
+
+          if (!out.length) {
+            statusEl.className = "status err";
+            statusEl.textContent = "Dosyada geçerli satır bulunamadı.";
+            return;
+          }
+
+          generatedJS =
+            "/* Vana CFD Kataloğu - Veri Dosyası (loader.html ile üretildi) */\n" +
+            "window.VALVE_DATA = " +
+            JSON.stringify(out, null, 2) +
+            ";\n";
+
+          previewEl.textContent =
+            `${out.length} kayıt işlendi.\n` +
+            (errors.length ? "UYARILAR:\n- " + errors.join("\n- ") + "\n\n" : "") +
+            generatedJS.slice(0, 1500) +
+            (generatedJS.length > 1500 ? "\n... (kısaltıldı)" : "");
+
+          statusEl.className = "status " + (errors.length ? "err" : "ok");
+          statusEl.textContent = errors.length
+            ? `${out.length} kayıt işlendi, ${errors.length} uyarı var (önizlemeye bakın).`
+            : `✓ ${out.length} kayıt başarıyla işlendi.`;
+          dlDataBtn.disabled = false;
+        } catch (err) {
+          statusEl.className = "status err";
+          statusEl.textContent = "Dosya okunamadı: " + err.message;
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    const drop = document.getElementById("drop");
+    const fileInput = document.getElementById("file");
+    drop.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", (e) => e.target.files[0] && handleFile(e.target.files[0]));
+    ["dragenter", "dragover"].forEach((ev) =>
+      drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); })
+    );
+    ["dragleave", "drop"].forEach((ev) =>
+      drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); })
+    );
+    drop.addEventListener("drop", (e) => e.dataTransfer.files[0] && handleFile(e.dataTransfer.files[0]));
+
+    dlDataBtn.addEventListener("click", () => {
+      if (generatedJS) downloadFile("data.js", generatedJS, "text/javascript");
+    });
+
+    function downloadFile(name, content, mime) {
+      const blob = new Blob([content], { type: mime + ";charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+    }
+  </script>
+</body>
+</html>

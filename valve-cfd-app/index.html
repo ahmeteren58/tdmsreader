@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vana CFD Kataloğu</title>
+  <link rel="stylesheet" href="assets/app.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">CFD</div>
+      <div>
+        <h1>Vana CFD Kataloğu</h1>
+        <p class="subtitle">Yerel · İnternetsiz · Kurulumsuz</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <input id="search" class="search" type="search" placeholder="Ara: ad, tip, DN, akışkan, not..." />
+      <a class="btn btn-ghost" href="loader.html" title="Excel/CSV'den veri üret">Veri Yükle</a>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="filter-group">
+        <h3>Vana Tipi</h3>
+        <div id="filter-type" class="chips"></div>
+      </div>
+      <div class="filter-group">
+        <h3>Ölçü (DN)</h3>
+        <div id="filter-dn" class="chips"></div>
+      </div>
+      <div class="filter-group">
+        <h3>Akışkan</h3>
+        <div id="filter-fluid" class="chips"></div>
+      </div>
+      <div class="filter-group">
+        <h3>Açıklık (%)</h3>
+        <div class="range-row">
+          <input type="range" id="opening-min" min="0" max="100" value="0" />
+          <span id="opening-min-val">0</span>
+          <span>–</span>
+          <span id="opening-max-val">100</span>
+          <input type="range" id="opening-max" min="0" max="100" value="100" />
+        </div>
+      </div>
+      <div class="filter-group">
+        <label class="check-inline">
+          <input type="checkbox" id="filter-cav" />
+          Sadece kavitasyon riskli (σ &lt; 1.5)
+        </label>
+      </div>
+      <button id="reset-filters" class="btn btn-ghost btn-block">Filtreleri Temizle</button>
+    </aside>
+
+    <main class="content">
+      <div class="toolbar">
+        <div class="result-count"><span id="count">0</span> sonuç</div>
+        <div class="toolbar-right">
+          <label class="sort-label">Sırala:
+            <select id="sort">
+              <option value="name">Ad</option>
+              <option value="dn">DN</option>
+              <option value="cv">Cv</option>
+              <option value="deltaP">ΔP</option>
+              <option value="kFactor">K faktörü</option>
+              <option value="cavitationIndex">Kavitasyon (σ)</option>
+            </select>
+          </label>
+          <button id="compare-btn" class="btn btn-primary" disabled>Karşılaştır (<span id="sel-count">0</span>)</button>
+          <button id="pptx-btn" class="btn btn-accent" disabled>Sunum Oluştur (PPTX)</button>
+        </div>
+      </div>
+      <div id="grid" class="grid"></div>
+      <div id="empty" class="empty hidden">Filtrelere uyan sonuç yok.</div>
+    </main>
+  </div>
+
+  <!-- Detay modalı -->
+  <div id="modal" class="modal hidden">
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-box">
+      <button class="modal-close" data-close>&times;</button>
+      <div id="modal-content"></div>
+    </div>
+  </div>
+
+  <!-- Karşılaştırma modalı -->
+  <div id="compare-modal" class="modal hidden">
+    <div class="modal-backdrop" data-close-compare></div>
+    <div class="modal-box modal-wide">
+      <button class="modal-close" data-close-compare>&times;</button>
+      <h2>Karşılaştırma</h2>
+      <div id="compare-content"></div>
+    </div>
+  </div>
+
+  <!-- Görsel büyütme -->
+  <div id="lightbox" class="lightbox hidden" data-close-lightbox>
+    <img id="lightbox-img" src="" alt="" />
+  </div>
+
+  <script src="assets/vendor/chart.umd.min.js"></script>
+  <script src="assets/vendor/pptxgen.bundle.js"></script>
+  <script src="assets/data.js"></script>
+  <script src="assets/app.js"></script>
+</body>
+</html>
